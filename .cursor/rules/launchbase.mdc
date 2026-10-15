@@ -1,0 +1,73 @@
+---
+description: LaunchBase project architecture and engineering rules
+alwaysApply: true
+---
+
+# LaunchBase
+
+LaunchBase is a portfolio-grade mini deployment platform. A user connects a GitHub repository, requests a deployment, watches live logs, and receives a routed URL to a Docker container.
+
+## Architecture
+
+- apps/web: Next.js App Router, TypeScript, Tailwind
+- backend/cmd/api: Go HTTP API
+- backend/cmd/worker: Go background deployment worker
+- backend/internal: domain, store, queue, GitHub, Docker, logs, HTTP handlers
+- PostgreSQL: durable application data
+- Redis: deployment jobs and short-lived coordination
+- Docker: build and runtime containers
+- Traefik: routing to ready deployments
+- OpenAPI: API contract
+
+## Core invariants
+
+1. The API never executes repository code or controls long-running builds directly.
+2. Only the worker controls Docker.
+3. User containers never receive the Docker socket, infrastructure credentials, or LaunchBase secrets.
+4. Deployment state changes go through one validated state machine.
+5. Long-running operations have timeouts and cleanup.
+6. Jobs are idempotent and safe to retry.
+7. Repository input is untrusted.
+8. Secrets never appear in logs, API responses, test snapshots, or Git history.
+9. Every feature includes tests, documentation, and failure handling.
+10. Implement only the requested phase. Do not add future roadmap features.
+
+## Go rules
+
+- Prefer the standard library and small focused dependencies.
+- Keep HTTP handlers thin; use service and repository interfaces.
+- Wrap external commands behind testable interfaces.
+- Pass context.Context through I/O boundaries.
+- Use structured errors and never expose raw internal errors to clients.
+- Use parameterized SQL and explicit migrations.
+- Use UTC timestamps and UUID identifiers.
+- Run gofmt, go vet, and tests before completion.
+
+## TypeScript rules
+
+- Enable strict TypeScript.
+- Do not use any unless there is a documented boundary and validation.
+- Validate server data using generated types or runtime schemas.
+- Build accessible keyboard-friendly components.
+- Include loading, empty, error, and retry states.
+- Do not duplicate backend business rules in the UI.
+- Run lint, type-check, and tests before completion.
+
+## Docker and security rules
+
+- Never use privileged containers.
+- Never use host networking for user applications.
+- Never mount the Docker socket into user applications.
+- Use dedicated infrastructure and runtime networks.
+- Apply CPU, memory, process, timeout, and log limits.
+- Prefer non-root and multi-stage images.
+- Treat user repositories and build output as untrusted.
+- Clean containers, images, and temporary directories after failure.
+
+## Change discipline
+
+- Read existing code before editing.
+- Keep changes small and reviewable.
+- Do not rewrite working unrelated modules.
+- Update README, OpenAPI, migrations, and architecture docs when contracts change.
+- At the end of each task, summarize changed files, commands run, test results, assumptions, and remaining limitations.
