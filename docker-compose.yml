@@ -1,0 +1,61 @@
+name: launchbase
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: launchbase
+      POSTGRES_PASSWORD: launchbase
+      POSTGRES_DB: launchbase
+    # host 5433 because another local postgres already uses 5432
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - launchbase
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U launchbase -d launchbase"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - launchbase
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # dashboard is published on 8088 so it doesn't collide with the api on 8080
+  traefik:
+    image: traefik:v3.5
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    volumes:
+      - ./infrastructure/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    ports:
+      - "80:80"
+      - "8088:8080"
+    networks:
+      - launchbase
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  launchbase:
+    name: launchbase
