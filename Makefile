@@ -6,7 +6,7 @@ help:
 	@echo "dev-infra    postgres, redis, traefik"
 	@echo "stop-infra   stop those containers"
 	@echo "api          go api on :8080"
-	@echo "worker       go worker (idle until later phases)"
+	@echo "worker       deploy a github repo: REPO=https://github.com/owner/name make worker"
 	@echo "web          next.js on :3000"
 	@echo "test         go tests and frontend typecheck"
 	@echo "lint         go vet and eslint"
@@ -22,7 +22,7 @@ api:
 	cd backend && go run ./cmd/api
 
 worker:
-	cd backend && go run ./cmd/worker
+	cd backend && go run ./cmd/worker --repo "$(REPO)" --branch "$(BRANCH)"
 
 web:
 	cd apps/web && pnpm dev
