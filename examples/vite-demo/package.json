@@ -1,0 +1,11 @@
+{
+  "name": "vite-demo",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "6.3.5"
+  }
+}

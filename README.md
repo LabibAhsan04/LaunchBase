@@ -66,13 +66,18 @@ That URL is the app. Traefik is not in front of it yet. If the build or the heal
 
 Ctrl-C cancels the clone or the build. A container that was already started is removed.
 
-The example in `examples/node-demo` is not a GitHub repo, so the worker command will not accept it as `--repo`. This script builds that example with the same code and then removes the container:
+Repos without a Dockerfile are detected from `package.json` and the lockfile. The rules are in `docs/supported-frameworks.md`. The worker writes a Dockerfile of its own and builds that. It does not run npm, pnpm, or yarn on your machine.
+
+The example in `examples/node-demo` is not a GitHub repo, so the worker command will not accept it as `--repo`. These scripts build the examples with the same code and then remove the container:
 
 ```bash
 infrastructure/scripts/test-local-deploy.sh
+infrastructure/scripts/test-node-http.sh
+infrastructure/scripts/test-vite-demo.sh
+infrastructure/scripts/test-next-demo.sh
 ```
 
-It needs Docker. `make test` does not run it.
+`node-demo` already has a Dockerfile. `node-http` is a Node server without one. Vite and Next.js are detected. The scripts need Docker. `make test` does not run them.
 
 ## Checks
 
@@ -86,4 +91,4 @@ make format
 
 ## Not built yet
 
-Repos without a Dockerfile, the queue, auth, live logs, and the real dashboard are later work. Vite and Next.js examples are still empty.
+The queue, auth, live logs, and the real dashboard are later work.

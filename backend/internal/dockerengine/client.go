@@ -81,6 +81,7 @@ type RunSpec struct {
 	CPUs   string
 	PIDs   string
 	User   string
+	Tmpfs  []string
 }
 
 func (c Client) Start(ctx context.Context, spec RunSpec) error {
@@ -112,6 +113,9 @@ func containerRunArgs(s RunSpec) []string {
 		"--read-only",
 		"--tmpfs", "/tmp",
 		"-p", "127.0.0.1::" + s.Port,
+	}
+	for _, dir := range s.Tmpfs {
+		args = append(args, "--tmpfs", dir)
 	}
 	if s.User != "" {
 		args = append(args, "--user", s.User)

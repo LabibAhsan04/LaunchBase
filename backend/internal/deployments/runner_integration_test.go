@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,23 @@ import (
 )
 
 func TestExampleNodeDemo(t *testing.T) {
+	deployExample(t, "examples/node-demo", "ok")
+}
+
+func TestExampleNodeHTTP(t *testing.T) {
+	deployExample(t, "examples/node-http", "ok")
+}
+
+func TestExampleVite(t *testing.T) {
+	deployExample(t, "examples/vite-demo", "vite demo")
+}
+
+func TestExampleNext(t *testing.T) {
+	deployExample(t, "examples/nextjs-demo", "next demo")
+}
+
+func deployExample(t *testing.T, rel, want string) {
+	t.Helper()
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Fatalf("docker is not available: %v", err)
 	}
@@ -24,23 +42,23 @@ func TestExampleNodeDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Clean(filepath.Join(wd, "..", "..", "..", "examples", "node-demo"))
-	if _, err := os.Stat(filepath.Join(dir, "Dockerfile")); err != nil {
-		t.Fatal(err)
+	dir := filepath.Clean(filepath.Join(wd, "..", "..", "..", rel))
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		t.Fatalf("example %s: %v", dir, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 
 	res, err := Run(ctx, Options{
 		LocalDir:     dir,
 		HealthPath:   "/",
 		CloneTimeout: time.Minute,
-		BuildTimeout: 3 * time.Minute,
-		StartTimeout: 45 * time.Second,
-		Memory:       "256m",
+		BuildTimeout: 6 * time.Minute,
+		StartTimeout: time.Minute,
+		Memory:       "512m",
 		CPUs:         "1.0",
-		PIDs:         "64",
+		PIDs:         "128",
 		Stdout:       os.Stdout,
 		Runner:       dockerengine.Local{},
 	})
@@ -58,7 +76,7 @@ func TestExampleNodeDemo(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || string(body) != "ok\n" {
+	if resp.StatusCode != 200 || !strings.Contains(string(body), want) {
 		t.Fatalf("status %d body %q", resp.StatusCode, body)
 	}
 }

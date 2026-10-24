@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/framework"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 )
 
@@ -108,11 +109,15 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 	}
 
 	var cloned string
+	var staged string
 	started := false
 	built := false
 	defer func() {
 		if cloned != "" {
 			_ = os.RemoveAll(cloned)
+		}
+		if staged != "" {
+			_ = os.RemoveAll(staged)
 		}
 		if err == nil {
 			return
@@ -162,10 +167,24 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		return Result{}, err
 	}
 	opt.logf("status %s", dep.Status)
-	if err = hasDockerfile(source); err != nil {
+	detected, err := framework.Detect(source)
+	if err != nil {
 		return Result{}, err
 	}
-	opt.logf("found Dockerfile")
+	opt.logf("detected %s (%s)", detected.Framework, detected.Reason)
+	if detected.Framework != framework.Dockerfile {
+		// a local example directory must stay untouched. clones are already temp dirs.
+		if opt.LocalDir != "" {
+			staged, err = stageCopy(opt.WorkRoot, source)
+			if err != nil {
+				return Result{}, err
+			}
+			source = staged
+		}
+		if err = framework.WriteBuildFiles(source, detected); err != nil {
+			return Result{}, err
+		}
+	}
 
 	if err = dep.Advance(StatusBuilding); err != nil {
 		return Result{}, err
@@ -212,6 +231,7 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		CPUs:   opt.CPUs,
 		PIDs:   opt.PIDs,
 		User:   user,
+		Tmpfs:  detected.Tmpfs,
 	})
 	if err != nil {
 		return Result{}, err
@@ -309,23 +329,45 @@ func cloneRepo(ctx context.Context, run dockerengine.Runner, cloneURL, branch, d
 	return nil
 }
 
+func stageCopy(root, src string) (string, error) {
+	dst, err := os.MkdirTemp(root, "launchbase-build-")
+	if err != nil {
+		return "", err
+	}
+	err = filepath.WalkDir(src, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(src, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == ".git") {
+			return filepath.SkipDir
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		_ = os.RemoveAll(dst)
+		return "", err
+	}
+	return dst, nil
+}
+
 func checkHealthPath(p string) error {
 	if !strings.HasPrefix(p, "/") || strings.Contains(p, "://") || strings.ContainsAny(p, " \t") {
 		return fmt.Errorf("health path must look like / or /health")
-	}
-	return nil
-}
-
-func hasDockerfile(dir string) error {
-	info, err := os.Stat(filepath.Join(dir, "Dockerfile"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("no Dockerfile at the repository root")
-		}
-		return err
-	}
-	if info.IsDir() {
-		return fmt.Errorf("Dockerfile is a directory")
 	}
 	return nil
 }
