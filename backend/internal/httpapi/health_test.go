@@ -11,7 +11,7 @@ func TestHealthOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 
-	NewMux().ServeHTTP(rr, req)
+	NewMux(nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("got status %d", rr.Code)
@@ -33,7 +33,7 @@ func TestHealthRejectsOtherMethods(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/health", nil)
 	rr := httptest.NewRecorder()
 
-	NewMux().ServeHTTP(rr, req)
+	NewMux(nil).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("got status %d", rr.Code)

@@ -5,7 +5,7 @@
 help:
 	@echo "dev-infra    postgres, redis, traefik"
 	@echo "stop-infra   stop those containers"
-	@echo "api          go api on :8080"
+	@echo "api          go api on :8080, applies migrations"
 	@echo "worker       deploy a github repo: REPO=https://github.com/owner/name make worker"
 	@echo "web          next.js on :3000"
 	@echo "test         go tests and frontend typecheck"

@@ -21,7 +21,9 @@ import (
 type Options struct {
 	RepoURL      string
 	Branch       string
+	ID           string // optional. the api sets this so the row and the container share an id.
 	LocalDir     string // integration test only. the cli does not set this.
+	OnStatus     func(Status) error
 	Port         int
 	HealthPath   string
 	CloneTimeout time.Duration
@@ -91,9 +93,12 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		cloneURL = repo.CloneURL
 	}
 
-	id, err := opt.NewID()
-	if err != nil {
-		return Result{}, err
+	id := opt.ID
+	if id == "" {
+		id, err = opt.NewID()
+		if err != nil {
+			return Result{}, err
+		}
 	}
 	image := "launchbase/" + id
 	container := "launchbase-" + id
@@ -123,8 +128,8 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 			return
 		}
 		if dep.Status != StatusFailed && dep.Status != StatusReady {
-			if advErr := dep.Advance(StatusFailed); advErr == nil {
-				opt.logf("status %s", dep.Status)
+			if advErr := opt.advance(dep, StatusFailed); advErr != nil {
+				opt.logf("status update: %v", advErr)
 			}
 		}
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -141,10 +146,9 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		}
 	}()
 
-	if err = dep.Advance(StatusCloning); err != nil {
+	if err = opt.advance(dep, StatusCloning); err != nil {
 		return Result{}, err
 	}
-	opt.logf("status %s", dep.Status)
 
 	if cloneURL != "" {
 		cloned, err = os.MkdirTemp(opt.WorkRoot, "launchbase-")
@@ -163,10 +167,9 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		opt.logf("using %s", source)
 	}
 
-	if err = dep.Advance(StatusDetecting); err != nil {
+	if err = opt.advance(dep, StatusDetecting); err != nil {
 		return Result{}, err
 	}
-	opt.logf("status %s", dep.Status)
 	detected, err := framework.Detect(source)
 	if err != nil {
 		return Result{}, err
@@ -186,10 +189,9 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		}
 	}
 
-	if err = dep.Advance(StatusBuilding); err != nil {
+	if err = opt.advance(dep, StatusBuilding); err != nil {
 		return Result{}, err
 	}
-	opt.logf("status %s", dep.Status)
 	opt.logf("building %s", image)
 	buildCtx, cancel := context.WithTimeout(ctx, opt.BuildTimeout)
 	err = engine.Build(buildCtx, source, image, opt.Stdout)
@@ -199,10 +201,9 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 	}
 	built = true
 
-	if err = dep.Advance(StatusStarting); err != nil {
+	if err = opt.advance(dep, StatusStarting); err != nil {
 		return Result{}, err
 	}
-	opt.logf("status %s", dep.Status)
 
 	port := opt.Port
 	if port == 0 {
@@ -238,10 +239,9 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 	}
 	started = true
 
-	if err = dep.Advance(StatusHealthChecking); err != nil {
+	if err = opt.advance(dep, StatusHealthChecking); err != nil {
 		return Result{}, err
 	}
-	opt.logf("status %s", dep.Status)
 
 	host, err := engine.HostPort(ctx, container, port)
 	if err != nil {
@@ -257,10 +257,9 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		return Result{}, err
 	}
 
-	if err = dep.Advance(StatusReady); err != nil {
+	if err = opt.advance(dep, StatusReady); err != nil {
 		return Result{}, err
 	}
-	opt.logf("status %s", dep.Status)
 	opt.logf("id=%s", id)
 	opt.logf("image=%s", image)
 	opt.logf("container=%s", container)
@@ -307,6 +306,20 @@ func (o *Options) fill() {
 
 func (o Options) logf(format string, args ...any) {
 	fmt.Fprintf(o.Stdout, format+"\n", args...)
+}
+
+func (o Options) advance(d *Deployment, to Status) error {
+	if err := d.Advance(to); err != nil {
+		return err
+	}
+	o.logf("status %s", d.Status)
+	if o.OnStatus == nil {
+		return nil
+	}
+	if err := o.OnStatus(d.Status); err != nil {
+		return fmt.Errorf("record status %s: %w", d.Status, err)
+	}
+	return nil
 }
 
 func cloneArgs(cloneURL, branch, dest string) []string {

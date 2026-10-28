@@ -1,0 +1,180 @@
+openapi: 3.0.3
+info:
+  title: LaunchBase API
+  version: 0.3.0
+  description: |
+    Local development acts as the seeded user `local`
+    (`00000000-0000-4000-8000-000000000001`). There is no login yet.
+
+    Creating a deployment runs the build before the response is sent.
+    The record is stored as QUEUED first. A later phase returns that
+    QUEUED response immediately and finishes the build on a worker.
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      summary: Process health
+      responses:
+        "200":
+          description: The process is up
+          content:
+            application/json:
+              example:
+                status: ok
+  /api/v1/projects:
+    get:
+      summary: List projects for the local user
+      responses:
+        "200":
+          description: Projects, newest first
+          content:
+            application/json:
+              example:
+                projects:
+                  - id: 6f1c3b2a-1111-4111-8111-111111111111
+                    name: Demo
+                    repoUrl: https://github.com/acme/web.git
+                    branch: main
+                    createdAt: "2026-10-27T18:00:00Z"
+                    updatedAt: "2026-10-27T18:00:00Z"
+    post:
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, repoUrl]
+              properties:
+                name:
+                  type: string
+                repoUrl:
+                  type: string
+                  example: https://github.com/acme/web
+                branch:
+                  type: string
+                  example: main
+      responses:
+        "201":
+          description: Project created. repoUrl is the normalized https clone URL.
+          content:
+            application/json:
+              example:
+                id: 6f1c3b2a-1111-4111-8111-111111111111
+                name: Demo
+                repoUrl: https://github.com/acme/web.git
+                branch: main
+                createdAt: "2026-10-27T18:00:00Z"
+                updatedAt: "2026-10-27T18:00:00Z"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectId}:
+    get:
+      summary: Get one project and its deployments
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: The project
+          content:
+            application/json:
+              example:
+                id: 6f1c3b2a-1111-4111-8111-111111111111
+                name: Demo
+                repoUrl: https://github.com/acme/web.git
+                branch: main
+                createdAt: "2026-10-27T18:00:00Z"
+                updatedAt: "2026-10-27T18:04:00Z"
+                deployments:
+                  - id: 7a2d4c3b-2222-4222-8222-222222222222
+                    projectId: 6f1c3b2a-1111-4111-8111-111111111111
+                    status: READY
+                    repoUrl: https://github.com/acme/web.git
+                    branch: main
+                    image: launchbase/7a2d4c3b-2222-4222-8222-222222222222
+                    container: launchbase-7a2d4c3b-2222-4222-8222-222222222222
+                    url: http://127.0.0.1:34567/
+                    createdAt: "2026-10-27T18:01:00Z"
+                    updatedAt: "2026-10-27T18:04:00Z"
+                    finishedAt: "2026-10-27T18:04:00Z"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectId}/deployments:
+    post:
+      summary: Create a deployment and run it
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                  description: Defaults to the project branch.
+      responses:
+        "201":
+          description: The deployment record after the build finishes. status is READY or FAILED.
+        "404":
+          $ref: "#/components/responses/Error"
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/v1/deployments/{deploymentId}:
+    get:
+      summary: Get one deployment
+      parameters:
+        - $ref: "#/components/parameters/DeploymentId"
+      responses:
+        "200":
+          description: The deployment
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/deployments/{deploymentId}/stop:
+    post:
+      summary: Stop a ready deployment
+      parameters:
+        - $ref: "#/components/parameters/DeploymentId"
+      responses:
+        "200":
+          description: status is STOPPED
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: The deployment is not READY
+          content:
+            application/json:
+              example:
+                error:
+                  code: conflict
+                  message: that status change is not allowed
+components:
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DeploymentId:
+      name: deploymentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Error:
+      description: Request failed
+      content:
+        application/json:
+          example:
+            error:
+              code: invalid_request
+              message: only https://github.com/owner/repo urls are allowed
