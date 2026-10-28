@@ -1,18 +1,20 @@
 # LaunchBase
 
-LaunchBase takes a GitHub repository, builds it in Docker, and gives you a URL. The worker can do that now for a public repository that already has a Dockerfile. The API still only answers a health check. Postgres, Redis, and Traefik are running for later phases and are not part of this deploy path.
+LaunchBase takes a GitHub repository, builds it in Docker, and gives you a URL. The API stores projects and deployments in Postgres. Creating a deployment from the API runs the worker in that same request and saves the result. Redis is not in that path yet.
 
 ## What is on disk
 
 | Path | What it is right now |
 | --- | --- |
 | `apps/web` | Next.js page. Placeholder, not a dashboard. |
-| `backend/cmd/api` | Go HTTP server. `GET /health` returns `{"status":"ok"}`. |
+| `backend/cmd/api` | Go HTTP server. Health check, projects, and deployments. |
 | `backend/cmd/worker` | Deploy command. Clones a public GitHub repo, builds its Dockerfile, and prints a localhost URL. |
 | `docker-compose.yml` | Postgres, Redis, Traefik on a network named `launchbase`. |
-| `backend/internal/*` | Empty packages. Filled in when that part of the system exists. |
+| `docs/openapi.yaml` | HTTP contract. |
 
-The API does not open a database connection and it does not talk to Docker. Only the worker does. That split stays: later the API will record a deployment and hand it to the worker through Redis. Right now you run the worker yourself.
+The API process opens Postgres and runs migrations on startup. Handlers do not call Docker. A service does, by calling the same deploy function the worker command uses. That call is synchronous for now. The next phase puts it on a Redis queue so the HTTP response can return while the build is still running.
+
+There is no login yet. Every request is the seeded user `local` (`00000000-0000-4000-8000-000000000001`).
 
 ## Prerequisites
 
@@ -28,7 +30,7 @@ cp apps/web/.env.example apps/web/.env.local
 make dev-infra
 ```
 
-Compose does not read `DATABASE_URL` from `.env`. The Postgres user, password, and database are set in `docker-compose.yml` and they match the URL in `.env.example`. The API only reads `API_ADDR` today.
+Compose does not read `DATABASE_URL` from `.env`. The Postgres user, password, and database are set in `docker-compose.yml` and they match the URL in `.env.example`. If `DATABASE_URL` is unset, the API uses that same local URL, including port 5433.
 
 Two terminals, if you want the placeholder site and the health check:
 
@@ -87,8 +89,45 @@ make lint
 make format
 ```
 
-`make test` runs `go test ./...` and `pnpm typecheck`. It does not need Docker. `make lint` is `go vet` plus eslint.
+`make test` runs `go test ./...` and `pnpm typecheck`. The API tests need Postgres (`make dev-infra`). They do not need a Docker build. The example deploy scripts do. `make lint` is `go vet` plus eslint.
+
+## API
+
+Start Postgres, then the API. Migrations run as the process starts.
+
+```bash
+make dev-infra
+make api
+```
+
+Create a project and read it back:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/projects \
+  -H 'content-type: application/json' \
+  -d '{"name":"Demo","repoUrl":"https://github.com/acme/web","branch":"main"}'
+
+curl -s http://localhost:8080/api/v1/projects
+```
+
+`repoUrl` is stored as `https://github.com/acme/web.git`. SSH URLs and local paths are rejected with `400` and a JSON `error` object.
+
+A deployment is created under a project. This call does not return until the build has finished. Build lines print in the API terminal. Timeouts and container limits come from the same variables as `make worker` (`CLONE_TIMEOUT`, `BUILD_TIMEOUT`, `START_TIMEOUT`, `DEPLOYMENT_MEMORY_LIMIT`, `DEPLOYMENT_CPU_LIMIT`, `DEPLOYMENT_PIDS_LIMIT`). `make api` does not load `.env` by itself. With those variables unset, the defaults are 1 minute to clone, 10 minutes to build, 1 minute to start, 512m memory, 1 CPU, and 128 processes.
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/projects/PROJECT_ID/deployments \
+  -H 'content-type: application/json' \
+  -d '{"branch":"main"}'
+```
+
+The body comes back `READY` with a localhost `url`, or `FAILED` with `error`. Stop a ready deployment with:
+
+```bash
+curl -s -X POST http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/stop
+```
+
+Stopping anything that is not `READY` returns `409`. The status list is the same one the worker uses. `QUEUED` cannot jump to `READY`. The contract is `docs/openapi.yaml`.
 
 ## Not built yet
 
-The queue, auth, live logs, and the real dashboard are later work.
+The queue, GitHub login, live logs, and the real dashboard are later work. Until the queue exists, one slow build holds the API request that started it.
