@@ -6,7 +6,7 @@ LaunchBase takes a GitHub repository, builds it in Docker, and gives you a URL. 
 
 | Path | What it is right now |
 | --- | --- |
-| `apps/web` | Next.js page. Placeholder, not a dashboard. |
+| `apps/web` | Next.js dashboard for projects and deployments. |
 | `backend/cmd/api` | Go HTTP server. Health check, projects, and deployments. |
 | `backend/cmd/worker` | Queue worker. Also a one-shot deploy when you pass `--repo`. |
 | `docker-compose.yml` | Postgres, Redis, Traefik on a network named `launchbase`. |
@@ -36,7 +36,7 @@ make dev-infra
 
 Compose does not read `DATABASE_URL` from `.env`. The Postgres user, password, and database are set in `docker-compose.yml` and they match the URL in `.env.example`. If `DATABASE_URL` is unset, the API uses that same local URL, including port 5433.
 
-Three terminals, if you want the API, the worker, and the placeholder site:
+Three terminals for the API, the worker, and the dashboard:
 
 ```bash
 make api
@@ -44,10 +44,12 @@ make worker
 make web
 ```
 
-- Web: http://localhost:3000
+- Dashboard: http://localhost:3000
 - API health: http://localhost:8080/health
 - Worker health: http://localhost:8081/health and http://localhost:8081/ready
 - Traefik dashboard: http://localhost:8088
+
+The browser talks to the Go API at `NEXT_PUBLIC_API_URL` (default `http://localhost:8080`). The API allows that origin through `WEB_ORIGIN` (default `http://localhost:3000`).
 
 Stop the containers with `make stop-infra`. That keeps the named volumes, so Postgres data sticks around.
 
@@ -95,7 +97,7 @@ make lint
 make format
 ```
 
-`make test` runs `go test ./...` and `pnpm typecheck`. The API and queue tests need Postgres and Redis (`make dev-infra`). They do not need a Docker build. The example deploy scripts do. `make lint` is `go vet` plus eslint.
+`make test` runs `go test ./...`, `pnpm typecheck`, and `pnpm test` in `apps/web`. The API and queue tests need Postgres and Redis (`make dev-infra`). They do not need a Docker build. The example deploy scripts do. `make lint` is `go vet` plus eslint.
 
 ## API
 
@@ -136,4 +138,18 @@ Stopping anything that is not `READY` returns `409`. The status list is the same
 
 ## Not built yet
 
-GitHub login, live logs, and the real dashboard are later work. The queue is Redis, and the worker is a separate process from the API.
+## Dashboard
+
+Open http://localhost:3000 after `make web`. Pages:
+
+- `/` project list
+- `/projects/new` create a project
+- `/projects/[projectId]` project detail and deploy form
+- `/deployments/[deploymentId]` status, URL, error, stop
+- `/settings` placeholder
+
+Status uses the same values as the API. Active deployments poll every two seconds. Live log streaming is the next phase.
+
+Screenshots for the README: with the API and worker running, create a project, queue a deploy, open the deployment page while it is `BUILDING`, then again when it is `READY` or `FAILED`. Save the images under `docs/screenshots/` when you have them. That folder is not required for the app to run.
+
+GitHub login and live logs are later work. The queue is Redis, and the worker is a separate process from the API.

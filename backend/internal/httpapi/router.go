@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
@@ -28,7 +30,25 @@ func NewMux(svc *service.Service) http.Handler {
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", h.getDeployment)
 		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", h.stopDeployment)
 	}
-	return requestIDs(mux)
+	return cors(requestIDs(mux))
+}
+
+func cors(next http.Handler) http.Handler {
+	origin := strings.TrimSpace(os.Getenv("WEB_ORIGIN"))
+	if origin == "" {
+		origin = "http://localhost:3000"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func requestIDs(next http.Handler) http.Handler {
