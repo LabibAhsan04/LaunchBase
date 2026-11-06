@@ -1,14 +1,13 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Local development acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`). There is no login yet.
 
-    Creating a deployment runs the build before the response is sent.
-    The record is stored as QUEUED first. A later phase returns that
-    QUEUED response immediately and finishes the build on a worker.
+    Creating a deployment stores a QUEUED row and returns immediately.
+    A separate worker builds the repository and moves the row to READY or FAILED.
 servers:
   - url: http://localhost:8080
 paths:
@@ -105,7 +104,7 @@ paths:
           $ref: "#/components/responses/Error"
   /api/v1/projects/{projectId}/deployments:
     post:
-      summary: Create a deployment and run it
+      summary: Queue a deployment
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       requestBody:
@@ -120,7 +119,7 @@ paths:
                   description: Defaults to the project branch.
       responses:
         "201":
-          description: The deployment record after the build finishes. status is READY or FAILED.
+          description: The deployment record. status is QUEUED. The worker updates it later.
         "404":
           $ref: "#/components/responses/Error"
         "400":

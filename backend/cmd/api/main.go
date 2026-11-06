@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/httpapi"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -41,40 +41,57 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
+	stream, err := queue.Open(redisURL())
+	if err != nil {
+		log.Fatalf("redis url: %v", err)
+	}
+	defer stream.Close()
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	if err := stream.Ping(ctx); err != nil {
+		log.Printf("redis is not reachable, queued deployments wait in postgres: %v", err)
+	}
+	cancel()
+	if err := stream.EnsureGroup(context.Background()); err != nil {
+		log.Printf("redis: %v", err)
+	}
+
 	svc := &service.Service{
 		Store:   db,
 		Remover: dockerengine.Client{},
 		Log:     os.Stdout,
-		Limits: deployments.Options{
-			CloneTimeout: envDuration("CLONE_TIMEOUT", time.Minute),
-			BuildTimeout: envDuration("BUILD_TIMEOUT", 10*time.Minute),
-			StartTimeout: envDuration("START_TIMEOUT", time.Minute),
-			Memory:       envString("DEPLOYMENT_MEMORY_LIMIT", "512m"),
-			CPUs:         envString("DEPLOYMENT_CPU_LIMIT", "1.0"),
-			PIDs:         envString("DEPLOYMENT_PIDS_LIMIT", "128"),
+		Flush: func(ctx context.Context) error {
+			_, err := db.PublishPending(ctx, func(payload []byte) error {
+				return stream.Publish(ctx, payload)
+			})
+			return err
 		},
 	}
+	go publishLoop(db, stream)
+
 	log.Printf("api listening on %s", addr)
 	if err := http.ListenAndServe(addr, httpapi.NewMux(svc)); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func envString(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
+func publishLoop(db *store.DB, stream *queue.Stream) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for range t.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := db.PublishPending(ctx, func(payload []byte) error {
+			return stream.Publish(ctx, payload)
+		})
+		cancel()
+		if err != nil {
+			log.Printf("queue: %v", err)
+		}
 	}
-	return fallback
 }
 
-func envDuration(key string, fallback time.Duration) time.Duration {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
+func redisURL() string {
+	if v := strings.TrimSpace(os.Getenv("REDIS_URL")); v != "" {
+		return v
 	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		log.Fatalf("%s must be a duration like 60s or 10m", key)
-	}
-	return d
+	return "redis://localhost:6379/0"
 }

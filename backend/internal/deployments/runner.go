@@ -100,8 +100,8 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 			return Result{}, err
 		}
 	}
-	image := "launchbase/" + id
-	container := "launchbase-" + id
+	image := ImageName(id)
+	container := ContainerName(id)
 	dep := &Deployment{ID: id, Status: StatusQueued}
 	opt.logf("deployment %s", id)
 	opt.logf("status %s", dep.Status)

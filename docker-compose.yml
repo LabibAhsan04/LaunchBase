@@ -20,6 +20,8 @@ services:
       timeout: 5s
       retries: 10
 
+  # redis is the queue between the api and the worker.
+  # those two processes stay on the host: make api, and make worker.
   redis:
     image: redis:7-alpine
     ports:

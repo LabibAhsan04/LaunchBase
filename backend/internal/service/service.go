@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
 
@@ -29,19 +31,17 @@ type ConflictError struct {
 
 func (e ConflictError) Error() string { return e.Message }
 
-// Remover stops a container. The HTTP handler does not call Docker itself.
+// Remover stops a container. The HTTP handler does not build or start one.
 type Remover interface {
 	RemoveContainer(ctx context.Context, name string) error
 }
 
-type Runner func(context.Context, deployments.Options) (deployments.Result, error)
-
 type Service struct {
 	Store   *store.DB
-	Run     Runner
 	Remover Remover
 	Log     io.Writer
-	Limits  deployments.Options
+	// Flush publishes one outbox row. The deployment is already committed if this fails.
+	Flush func(context.Context) error
 }
 
 func (s *Service) CreateProject(ctx context.Context, name, repoURL, branch string) (store.Project, error) {
@@ -118,62 +118,38 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 	if err != nil {
 		return store.Deployment{}, err
 	}
+	outboxID, err := newID()
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	payload, err := json.Marshal(queue.Job{
+		Version:      queue.JobVersion,
+		DeploymentID: id,
+		ProjectID:    project.ID,
+		RepoURL:      project.RepoURL,
+		Branch:       branch,
+		Attempt:      1,
+	})
+	if err != nil {
+		return store.Deployment{}, err
+	}
 	dep, err := s.Store.CreateDeployment(ctx, store.Deployment{
 		ID:        id,
 		ProjectID: project.ID,
 		Status:    string(deployments.StatusQueued),
 		RepoURL:   project.RepoURL,
 		Branch:    branch,
-	})
+	}, outboxID, payload)
 	if err != nil {
 		return store.Deployment{}, err
 	}
 	_ = s.audit(ctx, "deployment.created", project.ID, dep.ID, dep.RepoURL)
-
-	// The request waits for the build. The queue in the next phase replaces this.
-	current := deployments.StatusQueued
-	run := s.Run
-	if run == nil {
-		run = deployments.Run
-	}
-	result, runErr := run(ctx, deployments.Options{
-		ID:           dep.ID,
-		RepoURL:      dep.RepoURL,
-		Branch:       dep.Branch,
-		CloneTimeout: s.Limits.CloneTimeout,
-		BuildTimeout: s.Limits.BuildTimeout,
-		StartTimeout: s.Limits.StartTimeout,
-		Memory:       s.Limits.Memory,
-		CPUs:         s.Limits.CPUs,
-		PIDs:         s.Limits.PIDs,
-		Stdout:       s.Log,
-		OnStatus: func(next deployments.Status) error {
-			if !deployments.CanTransition(current, next) {
-				return fmt.Errorf("cannot go from %s to %s", current, next)
-			}
-			if err := s.Store.Transition(ctx, dep.ID, string(current), string(next)); err != nil {
-				return err
-			}
-			current = next
-			return nil
-		},
-	})
-	if runErr != nil {
-		if current != deployments.StatusFailed && deployments.CanTransition(current, deployments.StatusFailed) {
-			if err := s.Store.Transition(ctx, dep.ID, string(current), string(deployments.StatusFailed)); err == nil {
-				current = deployments.StatusFailed
-			}
+	if s.Flush != nil {
+		if err := s.Flush(ctx); err != nil && s.Log != nil {
+			fmt.Fprintf(s.Log, "queue: %v\n", err)
 		}
-		summary := oneLine(runErr.Error())
-		_ = s.Store.SetError(ctx, dep.ID, summary)
-		_ = s.audit(ctx, "deployment.failed", project.ID, dep.ID, summary)
-		return s.Store.GetDeployment(ctx, store.LocalUserID, dep.ID)
 	}
-	if err := s.Store.SetResult(ctx, dep.ID, result.Image, result.Container, result.URL); err != nil {
-		return store.Deployment{}, err
-	}
-	_ = s.audit(ctx, "deployment.ready", project.ID, dep.ID, result.URL)
-	return s.Store.GetDeployment(ctx, store.LocalUserID, dep.ID)
+	return dep, nil
 }
 
 func (s *Service) GetDeployment(ctx context.Context, id string) (store.Deployment, error) {
