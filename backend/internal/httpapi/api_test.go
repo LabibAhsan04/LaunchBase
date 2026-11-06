@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -24,7 +22,7 @@ import (
 func TestProjectAndDeploymentFlow(t *testing.T) {
 	remover := &fakeRemover{}
 	db, dsn := testDB(t)
-	svc := &service.Service{Store: db, Run: readyRun, Remover: remover}
+	svc := &service.Service{Store: db, Remover: remover}
 	mux := NewMux(svc)
 
 	res := call(t, mux, http.MethodPost, "/api/v1/projects", `{"name":"Demo","repoUrl":"https://github.com/acme/web.git","branch":"main"}`)
@@ -68,7 +66,19 @@ func TestProjectAndDeploymentFlow(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &dep); err != nil {
 		t.Fatal(err)
 	}
-	if dep.Status != "READY" || dep.URL != "http://127.0.0.1:34567/" || dep.Branch != "dev" {
+	if dep.Status != "QUEUED" || dep.URL != "" || dep.Branch != "dev" || dep.FinishedAt != nil {
+		t.Fatalf("%+v", dep)
+	}
+	pending, err := svc.Store.HasPendingOutbox(context.Background(), dep.ID)
+	if err != nil || !pending {
+		t.Fatalf("outbox pending=%v err=%v", pending, err)
+	}
+	advanceToReady(t, svc.Store, dep.ID)
+	res = call(t, mux, http.MethodGet, "/api/v1/deployments/"+dep.ID, "")
+	if err := json.Unmarshal(res.Body.Bytes(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if dep.Status != "READY" || dep.URL != "http://127.0.0.1:34567/" {
 		t.Fatalf("%+v", dep)
 	}
 	if dep.FinishedAt == nil || dep.FinishedAt.Location() != time.UTC {
@@ -98,7 +108,7 @@ func TestProjectAndDeploymentFlow(t *testing.T) {
 
 func TestRejectsBadInputAndIllegalStop(t *testing.T) {
 	db, _ := testDB(t)
-	svc := &service.Service{Store: db, Run: failRun, Remover: &fakeRemover{}}
+	svc := &service.Service{Store: db, Remover: &fakeRemover{}}
 	mux := NewMux(svc)
 
 	res := call(t, mux, http.MethodPost, "/api/v1/projects", `{"name":"Demo","repoUrl":"git@github.com:acme/web.git"}`)
@@ -129,7 +139,7 @@ func TestRejectsBadInputAndIllegalStop(t *testing.T) {
 	}
 	var dep deploymentJSON
 	_ = json.Unmarshal(res.Body.Bytes(), &dep)
-	if dep.Status != "FAILED" || !strings.Contains(dep.Error, "repository not found") {
+	if dep.Status != "QUEUED" {
 		t.Fatalf("%+v", dep)
 	}
 	res = call(t, mux, http.MethodPost, "/api/v1/deployments/"+dep.ID+"/stop", "")
@@ -143,49 +153,18 @@ func TestRejectsBadInputAndIllegalStop(t *testing.T) {
 	}
 }
 
-func TestStatusJumpIsNotStored(t *testing.T) {
-	db, _ := testDB(t)
-	svc := &service.Service{Store: db, Run: jumpRun}
-	mux := NewMux(svc)
-	res := call(t, mux, http.MethodPost, "/api/v1/projects", `{"name":"Demo","repoUrl":"https://github.com/acme/web"}`)
-	var created projectJSON
-	_ = json.Unmarshal(res.Body.Bytes(), &created)
-	res = call(t, mux, http.MethodPost, "/api/v1/projects/"+created.ID+"/deployments", "")
-	var dep deploymentJSON
-	_ = json.Unmarshal(res.Body.Bytes(), &dep)
-	if dep.Status != "FAILED" || dep.URL != "" {
-		t.Fatalf("jump stored as %+v", dep)
-	}
-}
-
-func readyRun(_ context.Context, opt deployments.Options) (deployments.Result, error) {
-	for _, st := range []deployments.Status{
-		deployments.StatusCloning,
-		deployments.StatusDetecting,
-		deployments.StatusBuilding,
-		deployments.StatusStarting,
-		deployments.StatusHealthChecking,
-		deployments.StatusReady,
-	} {
-		if err := opt.OnStatus(st); err != nil {
-			return deployments.Result{}, err
+func advanceToReady(t *testing.T, db *store.DB, id string) {
+	t.Helper()
+	cur := "QUEUED"
+	for _, next := range []string{"CLONING", "DETECTING", "BUILDING", "STARTING", "HEALTH_CHECKING", "READY"} {
+		if err := db.Transition(context.Background(), id, cur, next); err != nil {
+			t.Fatal(err)
 		}
+		cur = next
 	}
-	return deployments.Result{Image: "launchbase/test", Container: "launchbase-test", URL: "http://127.0.0.1:34567/"}, nil
-}
-
-func failRun(_ context.Context, opt deployments.Options) (deployments.Result, error) {
-	if err := opt.OnStatus(deployments.StatusCloning); err != nil {
-		return deployments.Result{}, err
+	if err := db.SetResult(context.Background(), id, "launchbase/test", "launchbase-test", "http://127.0.0.1:34567/"); err != nil {
+		t.Fatal(err)
 	}
-	return deployments.Result{}, fmt.Errorf("clone: repository not found")
-}
-
-func jumpRun(_ context.Context, opt deployments.Options) (deployments.Result, error) {
-	if err := opt.OnStatus(deployments.StatusReady); err != nil {
-		return deployments.Result{}, err
-	}
-	return deployments.Result{URL: "http://127.0.0.1:1/"}, nil
 }
 
 type fakeRemover struct {

@@ -52,6 +52,10 @@ type Deployment struct {
 	Status Status
 }
 
+func ContainerName(id string) string { return "launchbase-" + id }
+
+func ImageName(id string) string { return "launchbase/" + id }
+
 func (d *Deployment) Advance(to Status) error {
 	if !CanTransition(d.Status, to) {
 		return fmt.Errorf("cannot go from %s to %s", d.Status, to)

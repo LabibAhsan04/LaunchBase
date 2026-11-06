@@ -76,6 +76,10 @@ func (db *DB) Close() error {
 	return db.sql.Close()
 }
 
+func (db *DB) Ping(ctx context.Context) error {
+	return db.sql.PingContext(ctx)
+}
+
 func (db *DB) Migrate(ctx context.Context) error {
 	_, err := db.sql.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -85,25 +89,34 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("migration table: %w", err)
 	}
-	var found string
-	err = db.sql.QueryRowContext(ctx, `SELECT version FROM schema_migrations WHERE version = $1`, migrations.Version).Scan(&found)
-	if err == nil {
-		return nil
+	for _, file := range migrations.All() {
+		var found string
+		err = db.sql.QueryRowContext(ctx, `SELECT version FROM schema_migrations WHERE version = $1`, file.Version).Scan(&found)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := db.apply(ctx, file); err != nil {
+			return err
+		}
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
+	return nil
+}
+
+func (db *DB) apply(ctx context.Context, file migrations.File) error {
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, stmt := range splitSQL(migrations.Initial) {
+	for _, stmt := range splitSQL(file.SQL) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("apply %s: %w", migrations.Version, err)
+			return fmt.Errorf("apply %s: %w", file.Version, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)`, migrations.Version, time.Now().UTC()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)`, file.Version, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -159,16 +172,35 @@ func (db *DB) GetProject(ctx context.Context, ownerID, id string) (Project, erro
 	return p, err
 }
 
-func (db *DB) CreateDeployment(ctx context.Context, d Deployment) (Deployment, error) {
+// CreateDeployment inserts the QUEUED row and its outbox payload in one transaction.
+// The payload is what a worker will publish to Redis. A crash after this commit
+// still leaves the row for a later publisher.
+func (db *DB) CreateDeployment(ctx context.Context, d Deployment, outboxID string, payload []byte) (Deployment, error) {
 	now := time.Now().UTC()
 	d.CreatedAt = now
 	d.UpdatedAt = now
-	_, err := db.sql.ExecContext(ctx, `
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return Deployment{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO deployments (
 			id, project_id, status, repo_url, branch, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		d.ID, d.ProjectID, d.Status, d.RepoURL, d.Branch, d.CreatedAt, d.UpdatedAt)
 	if err != nil {
+		return Deployment{}, err
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO deployment_outbox (
+			id, deployment_id, payload, attempts, created_at, available_at
+		) VALUES ($1, $2, $3::jsonb, 1, $4, $4)`,
+		outboxID, d.ID, payload, now)
+	if err != nil {
+		return Deployment{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Deployment{}, err
 	}
 	return d, nil

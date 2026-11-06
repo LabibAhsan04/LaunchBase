@@ -1,12 +1,13 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-infra stop-infra api worker web test lint format
+.PHONY: help dev-infra stop-infra api worker worker-once web test lint format
 
 help:
 	@echo "dev-infra    postgres, redis, traefik"
 	@echo "stop-infra   stop those containers"
-	@echo "api          go api on :8080, applies migrations"
-	@echo "worker       deploy a github repo: REPO=https://github.com/owner/name make worker"
+	@echo "api          go api on :8080, applies migrations, publishes queued jobs"
+	@echo "worker       queue worker. consumes redis and builds deployments"
+	@echo "worker-once  one repo, no queue: REPO=https://github.com/owner/name make worker-once"
 	@echo "web          next.js on :3000"
 	@echo "test         go tests and frontend typecheck"
 	@echo "lint         go vet and eslint"
@@ -22,6 +23,9 @@ api:
 	cd backend && go run ./cmd/api
 
 worker:
+	cd backend && go run ./cmd/worker
+
+worker-once:
 	cd backend && go run ./cmd/worker --repo "$(REPO)" --branch "$(BRANCH)"
 
 web:
