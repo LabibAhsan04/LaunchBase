@@ -64,3 +64,6 @@ jobs:
       - name: typecheck
         working-directory: apps/web
         run: pnpm typecheck
+      - name: test
+        working-directory: apps/web
+        run: pnpm test

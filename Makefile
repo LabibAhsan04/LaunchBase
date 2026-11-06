@@ -34,6 +34,7 @@ web:
 test:
 	cd backend && go test ./...
 	cd apps/web && pnpm typecheck
+	cd apps/web && pnpm test
 
 lint:
 	cd backend && go vet ./...

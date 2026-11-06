@@ -1,13 +1,14 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Local development acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`). There is no login yet.
 
     Creating a deployment stores a QUEUED row and returns immediately.
     A separate worker builds the repository and moves the row to READY or FAILED.
+    The Next.js dashboard at http://localhost:3000 uses these endpoints and polls for status.
 servers:
   - url: http://localhost:8080
 paths:

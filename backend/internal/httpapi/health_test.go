@@ -39,3 +39,15 @@ func TestHealthRejectsOtherMethods(t *testing.T) {
 		t.Fatalf("got status %d", rr.Code)
 	}
 }
+
+func TestCORSPreflight(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/projects", nil)
+	rr := httptest.NewRecorder()
+	NewMux(nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got status %d", rr.Code)
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("origin %q", got)
+	}
+}
