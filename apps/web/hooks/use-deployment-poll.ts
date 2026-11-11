@@ -6,9 +6,7 @@ import { ApiError, getDeployment } from "@/lib/api/client";
 import type { Deployment } from "@/lib/api/types";
 import { isActiveStatus } from "@/lib/format";
 
-const INTERVAL_MS = 2000;
-
-export function useDeploymentPoll(initial: Deployment) {
+export function useDeploymentPoll(initial: Deployment, intervalMs = 2000) {
   const [deployment, setDeployment] = useState(initial);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,12 +29,12 @@ export function useDeploymentPoll(initial: Deployment) {
           }
         }
       })();
-    }, INTERVAL_MS);
+    }, intervalMs);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [deployment.id, deployment.status]);
+  }, [deployment.id, deployment.status, intervalMs]);
 
   return { deployment, error, setDeployment };
 }

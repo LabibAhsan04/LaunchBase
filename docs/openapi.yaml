@@ -1,14 +1,15 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Local development acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`). There is no login yet.
 
     Creating a deployment stores a QUEUED row and returns immediately.
     A separate worker builds the repository and moves the row to READY or FAILED.
-    The Next.js dashboard at http://localhost:3000 uses these endpoints and polls for status.
+    Build output is stored as bounded log rows and streamed over SSE.
+    The Next.js dashboard at http://localhost:3000 uses these endpoints.
 servers:
   - url: http://localhost:8080
 paths:
@@ -153,6 +154,60 @@ paths:
                 error:
                   code: conflict
                   message: that status change is not allowed
+  /api/v1/deployments/{deploymentId}/logs:
+    get:
+      summary: List stored build logs
+      parameters:
+        - $ref: "#/components/parameters/DeploymentId"
+        - name: after
+          in: query
+          schema:
+            type: integer
+            format: int64
+            default: 0
+          description: Return lines with seq greater than this value.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 200
+      responses:
+        "200":
+          description: Bounded history, oldest first
+          content:
+            application/json:
+              example:
+                logs:
+                  - seq: 1
+                    deploymentId: 7a2d4c3b-2222-4222-8222-222222222222
+                    ts: "2026-11-11T18:01:01Z"
+                    source: system
+                    level: info
+                    message: status CLONING
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/deployments/{deploymentId}/logs/stream:
+    get:
+      summary: Stream build logs with Server-Sent Events
+      parameters:
+        - $ref: "#/components/parameters/DeploymentId"
+        - name: after
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Same as Last-Event-ID. Reconnecting clients resume here.
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: |
+            text/event-stream. Events are `log`, `heartbeat`, and `done`.
+            Each `log` event has an id equal to its seq.
+        "404":
+          $ref: "#/components/responses/Error"
 components:
   parameters:
     ProjectId:

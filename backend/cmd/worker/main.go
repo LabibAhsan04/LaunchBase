@@ -16,6 +16,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -91,12 +92,24 @@ func runQueue() {
 	}
 	cancel()
 
+	hub, err := logs.NewRedisHub(redisURL())
+	if err != nil {
+		log.Fatalf("log hub: %v", err)
+	}
+	defer hub.Close()
+	broker := &logs.Broker{
+		Sink:    db,
+		Hub:     hub,
+		Secrets: logs.SecretsFromEnv(),
+	}
+
 	name := workerName()
 	proc := &deployments.Processor{
 		Store:  db,
 		Run:    deployments.Run,
 		Remove: dockerengine.Client{},
 		Log:    os.Stdout,
+		Logs:   broker,
 		Owner:  name,
 		Limits: deployments.Options{
 			CloneTimeout: envDuration("CLONE_TIMEOUT", time.Minute),
