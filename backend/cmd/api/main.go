@@ -10,6 +10,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/httpapi"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
@@ -55,10 +56,23 @@ func main() {
 		log.Printf("redis: %v", err)
 	}
 
+	hub, err := logs.NewRedisHub(redisURL())
+	if err != nil {
+		log.Fatalf("log hub: %v", err)
+	}
+	defer hub.Close()
+
+	broker := &logs.Broker{
+		Sink:    db,
+		Hub:     hub,
+		Secrets: logs.SecretsFromEnv(),
+	}
+
 	svc := &service.Service{
 		Store:   db,
 		Remover: dockerengine.Client{},
 		Log:     os.Stdout,
+		Logs:    broker,
 		Flush: func(ctx context.Context) error {
 			_, err := db.PublishPending(ctx, func(payload []byte) error {
 				return stream.Publish(ctx, payload)

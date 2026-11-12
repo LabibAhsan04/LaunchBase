@@ -1,5 +1,6 @@
 import {
   apiErrorSchema,
+  deploymentLogListSchema,
   deploymentSchema,
   projectListSchema,
   projectSchema,
@@ -8,6 +9,7 @@ import type {
   CreateDeploymentInput,
   CreateProjectInput,
   Deployment,
+  DeploymentLog,
   Project,
 } from "./types";
 
@@ -118,4 +120,17 @@ export function stopDeployment(deploymentId: string): Promise<Deployment> {
     { method: "POST" },
     (data) => deploymentSchema.parse(data),
   );
+}
+
+export function listLogs(deploymentId: string, after = 0): Promise<DeploymentLog[]> {
+  return request(
+    `/api/v1/deployments/${deploymentId}/logs?after=${after}`,
+    undefined,
+    (data) => deploymentLogListSchema.parse(data).logs,
+  );
+}
+
+export function logsStreamURL(deploymentId: string, after = 0): string {
+  const root = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  return `${root}/api/v1/deployments/${deploymentId}/logs/stream?after=${after}`;
 }

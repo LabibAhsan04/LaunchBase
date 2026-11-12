@@ -56,3 +56,12 @@ export type CreateProjectInput = {
 export type CreateDeploymentInput = {
   branch?: string;
 };
+
+export type DeploymentLog = {
+  seq: number;
+  deploymentId: string;
+  ts: string;
+  source: string;
+  level: string;
+  message: string;
+};

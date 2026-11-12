@@ -4,13 +4,17 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
 import { DeploymentStatusBadge } from "@/components/deployment-status";
+import { LiveLogViewer } from "@/components/live-log-viewer";
 import { ApiError, stopDeployment } from "@/lib/api/client";
 import type { Deployment } from "@/lib/api/types";
 import { formatDuration, formatWhen, shortRepo } from "@/lib/format";
 import { useDeploymentPoll } from "@/hooks/use-deployment-poll";
+import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 
 export function DeploymentDetail({ initial }: { initial: Deployment }) {
-  const { deployment, error: pollError, setDeployment } = useDeploymentPoll(initial);
+  // SSE is the live path. Status polling stays as a slow fallback.
+  const { deployment, error: pollError, setDeployment } = useDeploymentPoll(initial, 10000);
+  const { lines, state, error: streamError } = useDeploymentStream(initial.id, setDeployment);
   const [stopError, setStopError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
 
@@ -72,6 +76,8 @@ export function DeploymentDetail({ initial }: { initial: Deployment }) {
         {deployment.image ? <Item label="Image" value={deployment.image} mono /> : null}
         {deployment.container ? <Item label="Container" value={deployment.container} mono /> : null}
       </dl>
+
+      <LiveLogViewer lines={lines} state={state} error={streamError} />
 
       {deployment.status === "READY" ? (
         <div className="flex flex-wrap items-center gap-3">

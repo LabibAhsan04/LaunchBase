@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -27,6 +28,7 @@ type Processor struct {
 	Run         func(context.Context, Options) (Result, error)
 	Remove      Remover
 	Log         io.Writer
+	Logs        *logs.Broker
 	Limits      Options
 	Owner       string
 	MaxAttempts int
@@ -81,6 +83,8 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	if run == nil {
 		run = Run
 	}
+	stdout := logs.Tee(p.Log, p.Logs, dep.ID)
+	p.emit(dep.ID, logs.LevelInfo, "worker picked up deployment")
 	result, runErr := run(ctx, Options{
 		ID:           dep.ID,
 		RepoURL:      dep.RepoURL,
@@ -91,7 +95,7 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 		Memory:       p.Limits.Memory,
 		CPUs:         p.Limits.CPUs,
 		PIDs:         p.Limits.PIDs,
-		Stdout:       p.Log,
+		Stdout:       stdout,
 		OnStatus: func(next Status) error {
 			if next == StatusFailed {
 				return nil
@@ -103,9 +107,13 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 				return err
 			}
 			current = next
+			p.emit(dep.ID, logs.LevelInfo, "status "+string(next))
 			return nil
 		},
 	})
+	if flusher, ok := stdout.(interface{ Flush() }); ok {
+		flusher.Flush()
+	}
 	if runErr != nil {
 		return p.fail(ctx, dep, job, current, runErr)
 	}
@@ -114,6 +122,7 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	}
 	_ = p.audit(ctx, "deployment.ready", dep.ProjectID, dep.ID, result.URL)
 	p.logf("deployment %s ready %s", dep.ID, result.URL)
+	p.emit(dep.ID, logs.LevelDone, "ready "+result.URL)
 	return queue.Result{}, nil
 }
 
@@ -143,6 +152,8 @@ func (p *Processor) dead(ctx context.Context, dep store.Deployment, current Stat
 	_ = p.Store.SetError(ctx, dep.ID, summary)
 	_ = p.audit(ctx, "deployment.failed", dep.ProjectID, dep.ID, summary)
 	p.logf("deployment %s failed: %s", dep.ID, summary)
+	p.emit(dep.ID, logs.LevelError, summary)
+	p.emit(dep.ID, logs.LevelDone, "failed")
 	return queue.Result{Dead: true, Reason: summary}, nil
 }
 
@@ -226,6 +237,15 @@ func (p *Processor) logf(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(p.Log, format+"\n", args...)
+}
+
+func (p *Processor) emit(deploymentID, level, message string) {
+	if p.Logs == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _ = p.Logs.Append(ctx, deploymentID, logs.SourceSystem, level, message)
 }
 
 func terminal(status Status) bool {

@@ -136,7 +136,14 @@ curl -s -X POST http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/stop
 
 Stopping anything that is not `READY` returns `409`. The status list is the same one the worker uses. `QUEUED` cannot jump to `READY`. The contract is `docs/openapi.yaml`.
 
-## Not built yet
+Build logs for a deployment:
+
+```bash
+curl -s "http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/logs"
+curl -N "http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/logs/stream"
+```
+
+Lines are stored in Postgres with a per-deployment sequence number. Each deployment keeps at most 2000 lines. ANSI codes are stripped and values from `SESSION_SECRET`, `DATABASE_URL`, `REDIS_URL`, and anything listed in `LOG_REDACT_ENV` are replaced with `[redacted]` before a line is saved. The worker publishes new lines on Redis so the API can stream them. Heartbeats keep the stream open. A final `done` event closes it. `Last-Event-ID` resumes after a disconnect.
 
 ## Dashboard
 
@@ -145,11 +152,11 @@ Open http://localhost:3000 after `make web`. Pages:
 - `/` project list
 - `/projects/new` create a project
 - `/projects/[projectId]` project detail and deploy form
-- `/deployments/[deploymentId]` status, URL, error, stop
+- `/deployments/[deploymentId]` status, live logs, URL, error, stop
 - `/settings` placeholder
 
-Status uses the same values as the API. Active deployments poll every two seconds. Live log streaming is the next phase.
+Status uses the same values as the API. The deployment page opens an SSE log stream and polls status every 10 seconds as a fallback.
 
-Screenshots for the README: with the API and worker running, create a project, queue a deploy, open the deployment page while it is `BUILDING`, then again when it is `READY` or `FAILED`. Save the images under `docs/screenshots/` when you have them. That folder is not required for the app to run.
+Screenshots for the README: with the API and worker running, create a project, queue a deploy, open the deployment page while logs are scrolling, then again when it is `READY` or `FAILED`. Save the images under `docs/screenshots/` when you have them. That folder is not required for the app to run.
 
-GitHub login and live logs are later work. The queue is Redis, and the worker is a separate process from the API.
+GitHub login is later work. The queue is Redis, and the worker is a separate process from the API.

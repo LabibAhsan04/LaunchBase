@@ -39,3 +39,16 @@ export const apiErrorSchema = z.object({
     message: z.string(),
   }),
 });
+
+export const deploymentLogSchema = z.object({
+  seq: z.number(),
+  deploymentId: z.string(),
+  ts: z.string(),
+  source: z.string(),
+  level: z.string(),
+  message: z.string(),
+});
+
+export const deploymentLogListSchema = z.object({
+  logs: z.array(deploymentLogSchema),
+});

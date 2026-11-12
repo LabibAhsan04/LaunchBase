@@ -13,6 +13,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -40,6 +41,7 @@ type Service struct {
 	Store   *store.DB
 	Remover Remover
 	Log     io.Writer
+	Logs    *logs.Broker
 	// Flush publishes one outbox row. The deployment is already committed if this fails.
 	Flush func(context.Context) error
 }
@@ -157,6 +159,16 @@ func (s *Service) GetDeployment(ctx context.Context, id string) (store.Deploymen
 		return store.Deployment{}, store.ErrNotFound
 	}
 	return s.Store.GetDeployment(ctx, store.LocalUserID, id)
+}
+
+func (s *Service) ListLogs(ctx context.Context, deploymentID string, afterSeq int64, limit int) ([]logs.Event, error) {
+	if _, err := s.GetDeployment(ctx, deploymentID); err != nil {
+		return nil, err
+	}
+	if s.Logs == nil {
+		return []logs.Event{}, nil
+	}
+	return s.Logs.ListAfter(ctx, deploymentID, afterSeq, limit)
 }
 
 func (s *Service) StopDeployment(ctx context.Context, id string) (store.Deployment, error) {
