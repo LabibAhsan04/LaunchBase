@@ -118,6 +118,12 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 			if !CanTransition(current, next) {
 				return fmt.Errorf("cannot go from %s to %s", current, next)
 			}
+			// Defer READY until SetResult so URL/container appear with the status.
+			if next == StatusReady {
+				current = next
+				p.emit(dep.ID, logs.LevelInfo, "status "+string(next))
+				return nil
+			}
 			if err := p.Store.Transition(ctx, dep.ID, string(current), string(next)); err != nil {
 				return err
 			}
@@ -134,6 +140,11 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	}
 	if err := p.Store.SetResult(ctx, dep.ID, result.Image, result.Container, result.URL); err != nil {
 		return queue.Result{}, err
+	}
+	if current == StatusReady {
+		if err := p.Store.Transition(ctx, dep.ID, string(StatusHealthChecking), string(StatusReady)); err != nil {
+			return queue.Result{}, err
+		}
 	}
 	_ = p.audit(ctx, "deployment.ready", dep.ProjectID, dep.ID, result.URL)
 	p.logf("deployment %s ready %s", dep.ID, result.URL)
