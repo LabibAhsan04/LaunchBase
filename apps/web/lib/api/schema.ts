@@ -52,3 +52,43 @@ export const deploymentLogSchema = z.object({
 export const deploymentLogListSchema = z.object({
   logs: z.array(deploymentLogSchema),
 });
+
+export const authMeSchema = z.object({
+  id: z.string(),
+  login: z.string(),
+  displayName: z.string(),
+  avatarUrl: z.string(),
+  authMode: z.string(),
+});
+
+export const repoAccessSchema = z.object({
+  installationId: z.string(),
+  installationGhid: z.number(),
+  githubRepoId: z.number(),
+  owner: z.string(),
+  name: z.string(),
+  fullName: z.string(),
+  private: z.boolean(),
+  defaultBranch: z.string(),
+});
+
+export const repoListSchema = z.object({
+  repos: z.array(repoAccessSchema),
+});
+
+export const branchListSchema = z.object({
+  branches: z.array(z.string()),
+});
+
+export const installationListSchema = z.object({
+  installations: z.array(
+    z.object({
+      id: z.string(),
+      installationId: z.number(),
+      accountLogin: z.string(),
+      accountType: z.string(),
+      suspended: z.boolean(),
+    }),
+  ),
+  installUrl: z.string(),
+});

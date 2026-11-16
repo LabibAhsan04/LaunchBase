@@ -22,6 +22,11 @@ type Remover interface {
 	RemoveContainer(ctx context.Context, name string) error
 }
 
+// TokenSource mints a short-lived GitHub App installation token for private clones.
+type TokenSource interface {
+	CreateInstallationToken(ctx context.Context, installationID int64) (token string, err error)
+}
+
 // Processor runs one queued deployment. The API process does not call it.
 type Processor struct {
 	Store       *store.DB
@@ -31,6 +36,7 @@ type Processor struct {
 	Logs        *logs.Broker
 	Limits      Options
 	Owner       string
+	Tokens      TokenSource
 	MaxAttempts int
 	Stale       time.Duration
 	Backoff     func(attempt int) time.Duration
@@ -40,7 +46,7 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	if err := job.Validate(); err != nil {
 		return queue.Result{Dead: true, Reason: err.Error()}, nil
 	}
-	dep, err := p.Store.GetDeployment(ctx, store.LocalUserID, job.DeploymentID)
+	dep, err := p.Store.GetDeploymentByID(ctx, job.DeploymentID)
 	if errors.Is(err, store.ErrNotFound) {
 		return queue.Result{Dead: true, Reason: "deployment not found"}, nil
 	}
@@ -85,10 +91,19 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	}
 	stdout := logs.Tee(p.Log, p.Logs, dep.ID)
 	p.emit(dep.ID, logs.LevelInfo, "worker picked up deployment")
+	cloneToken := ""
+	if job.InstallationID != 0 && p.Tokens != nil {
+		tok, tokErr := p.Tokens.CreateInstallationToken(ctx, job.InstallationID)
+		if tokErr != nil {
+			return p.fail(ctx, dep, job, current, fmt.Errorf("installation token: %w", tokErr))
+		}
+		cloneToken = tok
+	}
 	result, runErr := run(ctx, Options{
 		ID:           dep.ID,
 		RepoURL:      dep.RepoURL,
 		Branch:       dep.Branch,
+		CloneToken:   cloneToken,
 		CloneTimeout: p.Limits.CloneTimeout,
 		BuildTimeout: p.Limits.BuildTimeout,
 		StartTimeout: p.Limits.StartTimeout,

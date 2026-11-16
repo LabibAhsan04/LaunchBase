@@ -19,9 +19,11 @@ vi.mock("@/lib/api/client", () => ({
     }
   },
   createProject: vi.fn(),
+  listRepos: vi.fn(),
+  listBranches: vi.fn(),
 }));
 
-import { createProject } from "@/lib/api/client";
+import { createProject, listBranches, listRepos } from "@/lib/api/client";
 import { ProjectForm } from "./project-form";
 
 describe("ProjectForm happy path", () => {
@@ -33,6 +35,10 @@ describe("ProjectForm happy path", () => {
     push.mockReset();
     refresh.mockReset();
     vi.mocked(createProject).mockReset();
+    vi.mocked(listRepos).mockReset();
+    vi.mocked(listBranches).mockReset();
+    vi.mocked(listRepos).mockResolvedValue([]);
+    vi.mocked(listBranches).mockResolvedValue([]);
   });
 
   it("creates a project and routes to it", async () => {
@@ -46,6 +52,7 @@ describe("ProjectForm happy path", () => {
     });
 
     render(<ProjectForm />);
+    await waitFor(() => expect(listRepos).toHaveBeenCalled());
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Demo" } });
     fireEvent.change(screen.getByLabelText("Repository URL"), {
       target: { value: "https://github.com/acme/web" },
@@ -64,8 +71,50 @@ describe("ProjectForm happy path", () => {
 
   it("shows client validation before calling the api", async () => {
     render(<ProjectForm />);
+    await waitFor(() => expect(listRepos).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("Name is required.")).toBeTruthy();
     expect(createProject).not.toHaveBeenCalled();
+  });
+
+  it("uses repository and branch selectors when repos are installed", async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        installationId: "inst",
+        installationGhid: 1,
+        githubRepoId: 9,
+        owner: "acme",
+        name: "web",
+        fullName: "acme/web",
+        private: false,
+        defaultBranch: "main",
+      },
+    ]);
+    vi.mocked(listBranches).mockResolvedValue(["main", "dev"]);
+    vi.mocked(createProject).mockResolvedValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "Demo",
+      repoUrl: "https://github.com/acme/web.git",
+      branch: "dev",
+      createdAt: "2026-11-06T00:00:00Z",
+      updatedAt: "2026-11-06T00:00:00Z",
+    });
+
+    render(<ProjectForm />);
+    await screen.findByLabelText("Repository");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Demo" } });
+    fireEvent.change(screen.getByLabelText("Repository"), { target: { value: "acme/web" } });
+    await waitFor(() => expect(listBranches).toHaveBeenCalledWith("acme/web"));
+    await screen.findByLabelText("Branch");
+    fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "dev" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => {
+      expect(createProject).toHaveBeenCalledWith({
+        name: "Demo",
+        fullName: "acme/web",
+        branch: "dev",
+      });
+    });
   });
 });

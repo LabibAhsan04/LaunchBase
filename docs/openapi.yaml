@@ -1,15 +1,16 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.6.0
+  version: 0.7.0
   description: |
-    Local development acts as the seeded user `local`
-    (`00000000-0000-4000-8000-000000000001`). There is no login yet.
+    AUTH_MODE=dev (default) acts as the seeded user `local`
+    (`00000000-0000-4000-8000-000000000001`) when no session cookie is present.
+    AUTH_MODE=github requires a signed-in session for project and deployment APIs.
 
+    Sessions use an HTTP-only cookie (`lb_session`). CORS allows credentials from WEB_ORIGIN.
     Creating a deployment stores a QUEUED row and returns immediately.
     A separate worker builds the repository and moves the row to READY or FAILED.
-    Build output is stored as bounded log rows and streamed over SSE.
-    The Next.js dashboard at http://localhost:3000 uses these endpoints.
+    Private clones use a short-lived GitHub App installation token on the worker only.
 servers:
   - url: http://localhost:8080
 paths:
@@ -23,9 +24,108 @@ paths:
             application/json:
               example:
                 status: ok
+  /api/v1/auth/login:
+    get:
+      summary: Start GitHub OAuth
+      responses:
+        "302":
+          description: Redirect to GitHub
+  /api/v1/auth/callback:
+    get:
+      summary: OAuth callback
+      responses:
+        "302":
+          description: Sets session cookie and redirects to the dashboard
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/logout:
+    post:
+      summary: Clear session
+      responses:
+        "200":
+          description: Session cleared
+  /api/v1/auth/me:
+    get:
+      summary: Current user
+      responses:
+        "200":
+          description: Session user
+          content:
+            application/json:
+              example:
+                id: 00000000-0000-4000-8000-000000000001
+                login: local
+                displayName: Local Developer
+                avatarUrl: ""
+                authMode: dev
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/install:
+    get:
+      summary: Redirect to GitHub App installation
+      responses:
+        "302":
+          description: Redirect to GitHub
+  /api/v1/webhooks/github:
+    post:
+      summary: GitHub App webhooks
+      responses:
+        "200":
+          description: Accepted
+        "401":
+          description: Signature mismatch
+  /api/v1/github/repos:
+    get:
+      summary: Repositories available through the user's installations
+      responses:
+        "200":
+          description: Authorized repositories
+          content:
+            application/json:
+              example:
+                repos:
+                  - installationId: 8f1c3b2a-1111-4111-8111-111111111111
+                    installationGhid: 123
+                    githubRepoId: 456
+                    owner: acme
+                    name: web
+                    fullName: acme/web
+                    private: false
+                    defaultBranch: main
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/github/repos/{owner}/{repo}/branches:
+    get:
+      summary: Branches for an authorized repository
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Branch names
+          content:
+            application/json:
+              example:
+                branches: [main, develop]
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/github/installations:
+    get:
+      summary: Linked GitHub App installations
+      responses:
+        "200":
+          description: Installations for the current user
   /api/v1/projects:
     get:
-      summary: List projects for the local user
+      summary: List projects for the current user
       responses:
         "200":
           description: Projects, newest first
@@ -39,6 +139,8 @@ paths:
                     branch: main
                     createdAt: "2026-10-27T18:00:00Z"
                     updatedAt: "2026-10-27T18:00:00Z"
+        "401":
+          $ref: "#/components/responses/Error"
     post:
       summary: Create a project
       requestBody:
@@ -47,13 +149,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, repoUrl]
+              required: [name]
               properties:
                 name:
                   type: string
+                fullName:
+                  type: string
+                  example: acme/web
+                  description: Preferred. Must be available through an installation when AUTH_MODE=github.
                 repoUrl:
                   type: string
                   example: https://github.com/acme/web
+                  description: Allowed in AUTH_MODE=dev when the repo is not yet linked to an installation.
                 branch:
                   type: string
                   example: main
@@ -70,6 +177,8 @@ paths:
                 createdAt: "2026-10-27T18:00:00Z"
                 updatedAt: "2026-10-27T18:00:00Z"
         "400":
+          $ref: "#/components/responses/Error"
+        "401":
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
@@ -205,7 +314,7 @@ paths:
         "200":
           description: |
             text/event-stream. Events are `log`, `heartbeat`, and `done`.
-            Each `log` event has an id equal to its seq.
+            Each `log` event has an id equal to its seq. Send cookies with credentials.
         "404":
           $ref: "#/components/responses/Error"
 components:

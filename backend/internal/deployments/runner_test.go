@@ -85,11 +85,15 @@ func (p staticProbe) Probe(context.Context, string) (int, error) {
 }
 
 func TestCloneArgs(t *testing.T) {
-	withBranch := strings.Join(cloneArgs("https://github.com/acme/web.git", "main", "/tmp/src"), " ")
+	withBranch := strings.Join(cloneArgs("https://github.com/acme/web.git", "main", "/tmp/src", ""), " ")
 	if withBranch != "clone --depth 1 --single-branch --branch main https://github.com/acme/web.git /tmp/src" {
 		t.Fatalf("%s", withBranch)
 	}
-	noBranch := cloneArgs("https://github.com/acme/web.git", "", "/tmp/src")
+	withToken := cloneArgs("https://github.com/acme/web.git", "main", "/tmp/src", "tok")
+	if withToken[0] != "-c" || !strings.Contains(withToken[1], "Authorization: Bearer tok") {
+		t.Fatalf("%v", withToken)
+	}
+	noBranch := cloneArgs("https://github.com/acme/web.git", "", "/tmp/src", "")
 	if contains(noBranch, "--branch") {
 		t.Fatalf("%v", noBranch)
 	}

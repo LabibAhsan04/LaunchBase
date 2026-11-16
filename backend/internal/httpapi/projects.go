@@ -2,18 +2,23 @@ package httpapi
 
 import (
 	"net/http"
+
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 )
 
 func (h handlers) createProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name    string `json:"name"`
-		RepoURL string `json:"repoUrl"`
-		Branch  string `json:"branch"`
+		Name     string `json:"name"`
+		RepoURL  string `json:"repoUrl"`
+		FullName string `json:"fullName"`
+		Branch   string `json:"branch"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	project, err := h.svc.CreateProject(r.Context(), body.Name, body.RepoURL, body.Branch)
+	project, err := h.svc.CreateProject(r.Context(), service.CreateProjectInput{
+		Name: body.Name, RepoURL: body.RepoURL, FullName: body.FullName, Branch: body.Branch,
+	})
 	if err != nil {
 		writeServiceError(w, err)
 		return

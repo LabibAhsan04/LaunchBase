@@ -10,29 +10,69 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
 
 type handlers struct {
 	svc *service.Service
+	gh  *github.Client
 }
 
 func NewMux(svc *service.Service) http.Handler {
+	return NewMuxWithGitHub(svc, nil)
+}
+
+func NewMuxWithGitHub(svc *service.Service, gh *github.Client) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
 	if svc != nil {
-		h := handlers{svc: svc}
-		mux.HandleFunc("POST /api/v1/projects", h.createProject)
-		mux.HandleFunc("GET /api/v1/projects", h.listProjects)
-		mux.HandleFunc("GET /api/v1/projects/{projectId}", h.getProject)
-		mux.HandleFunc("POST /api/v1/projects/{projectId}/deployments", h.createDeployment)
-		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", h.getDeployment)
-		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", h.stopDeployment)
-		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs", h.listLogs)
-		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs/stream", h.streamLogs)
+		h := handlers{svc: svc, gh: gh}
+		mux.HandleFunc("GET /api/v1/auth/login", h.authLogin)
+		mux.HandleFunc("GET /api/v1/auth/callback", h.authCallback)
+		mux.HandleFunc("POST /api/v1/auth/logout", h.authLogout)
+		mux.HandleFunc("GET /api/v1/auth/logout", h.authLogout)
+		mux.HandleFunc("GET /api/v1/auth/me", h.authMe)
+		mux.HandleFunc("GET /api/v1/auth/install", h.authInstall)
+		mux.HandleFunc("POST /api/v1/webhooks/github", h.githubWebhook)
+
+		mux.HandleFunc("GET /api/v1/github/repos", requireAuth(h.listGitHubRepos))
+		mux.HandleFunc("GET /api/v1/github/repos/{owner}/{repo}/branches", requireAuth(h.listGitHubBranches))
+		mux.HandleFunc("GET /api/v1/github/installations", requireAuth(h.listInstallations))
+
+		mux.HandleFunc("POST /api/v1/projects", requireAuth(h.createProject))
+		mux.HandleFunc("GET /api/v1/projects", requireAuth(h.listProjects))
+		mux.HandleFunc("GET /api/v1/projects/{projectId}", requireAuth(h.getProject))
+		mux.HandleFunc("POST /api/v1/projects/{projectId}/deployments", requireAuth(h.createDeployment))
+		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", requireAuth(h.getDeployment))
+		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", requireAuth(h.stopDeployment))
+		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs", requireAuth(h.listLogs))
+		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs/stream", requireAuth(h.streamLogs))
 	}
-	return cors(requestIDs(mux))
+
+	devUser := auth.User{
+		ID: store.LocalUserID, Login: "local", DisplayName: "Local Developer",
+	}
+	sessions := SessionStore(nil)
+	if svc != nil && svc.Store != nil {
+		sessions = svc.Store
+	}
+	withAuth := auth.Middleware{Sessions: sessions, DevUser: devUser}.Wrap(mux)
+	return cors(requestIDs(withAuth))
+}
+
+type SessionStore = auth.SessionStore
+
+func requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.UserFrom(r.Context()); !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "sign in required")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func cors(next http.Handler) http.Handler {
@@ -42,6 +82,7 @@ func cors(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, Last-Event-ID")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
@@ -89,6 +130,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	var input service.InputError
 	var conflict service.ConflictError
 	switch {
+	case errors.Is(err, auth.ErrUnauthorized):
+		writeError(w, http.StatusUnauthorized, "unauthorized", "sign in required")
 	case errors.As(err, &input):
 		writeError(w, http.StatusBadRequest, "invalid_request", input.Message)
 	case errors.As(err, &conflict):

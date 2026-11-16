@@ -16,6 +16,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
@@ -103,6 +104,11 @@ func runQueue() {
 		Secrets: logs.SecretsFromEnv(),
 	}
 
+	gh, err := github.ClientFromEnv()
+	if err != nil {
+		log.Fatalf("github: %v", err)
+	}
+
 	name := workerName()
 	proc := &deployments.Processor{
 		Store:  db,
@@ -111,6 +117,7 @@ func runQueue() {
 		Log:    os.Stdout,
 		Logs:   broker,
 		Owner:  name,
+		Tokens: github.InstallationTokens{Client: gh},
 		Limits: deployments.Options{
 			CloneTimeout: envDuration("CLONE_TIMEOUT", time.Minute),
 			BuildTimeout: envDuration("BUILD_TIMEOUT", 10*time.Minute),
