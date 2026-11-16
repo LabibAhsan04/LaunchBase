@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
@@ -318,11 +319,16 @@ func startWorker(t *testing.T, db *store.DB, stream *queue.Stream, proc *deploym
 func seed(t *testing.T, db *store.DB, name string) (string, string) {
 	t.Helper()
 	svc := &service.Service{Store: db}
-	project, err := svc.CreateProject(context.Background(), name, "https://github.com/acme/web", "main")
+	ctx := auth.WithUser(context.Background(), auth.User{
+		ID: store.LocalUserID, Login: "local", DisplayName: "Local Developer",
+	})
+	project, err := svc.CreateProject(ctx, service.CreateProjectInput{
+		Name: name, RepoURL: "https://github.com/acme/web", Branch: "main",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dep, err := svc.CreateDeployment(context.Background(), project.ID, "main")
+	dep, err := svc.CreateDeployment(ctx, project.ID, "main")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,16 +1,23 @@
 import {
   apiErrorSchema,
+  authMeSchema,
+  branchListSchema,
   deploymentLogListSchema,
   deploymentSchema,
+  installationListSchema,
   projectListSchema,
   projectSchema,
+  repoListSchema,
 } from "./schema";
 import type {
+  AuthMe,
   CreateDeploymentInput,
   CreateProjectInput,
   Deployment,
   DeploymentLog,
+  InstallationList,
   Project,
+  RepoAccess,
 } from "./types";
 
 export class ApiError extends Error {
@@ -32,6 +39,10 @@ function baseURL(): string {
   return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 }
 
+export function apiOrigin(): string {
+  return baseURL();
+}
+
 async function request<T>(
   path: string,
   init: RequestInit | undefined,
@@ -41,6 +52,7 @@ async function request<T>(
   try {
     res = await fetch(`${baseURL()}${path}`, {
       ...init,
+      credentials: "include",
       headers: {
         Accept: "application/json",
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
@@ -75,6 +87,41 @@ async function request<T>(
   } catch {
     throw new ApiError(res.status, "invalid_response", "The API response did not match the OpenAPI shape.");
   }
+}
+
+export function getMe(): Promise<AuthMe> {
+  return request("/api/v1/auth/me", undefined, (data) => authMeSchema.parse(data));
+}
+
+export function logout(): Promise<{ ok: boolean }> {
+  return request("/api/v1/auth/logout?json=1", { method: "POST" }, () => ({ ok: true }));
+}
+
+export function loginURL(): string {
+  return `${baseURL()}/api/v1/auth/login`;
+}
+
+export function installURL(): string {
+  return `${baseURL()}/api/v1/auth/install`;
+}
+
+export function listRepos(): Promise<RepoAccess[]> {
+  return request("/api/v1/github/repos", undefined, (data) => repoListSchema.parse(data).repos);
+}
+
+export function listBranches(fullName: string): Promise<string[]> {
+  const [owner, repo] = fullName.split("/");
+  return request(
+    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`,
+    undefined,
+    (data) => branchListSchema.parse(data).branches,
+  );
+}
+
+export function listInstallations(): Promise<InstallationList> {
+  return request("/api/v1/github/installations", undefined, (data) =>
+    installationListSchema.parse(data),
+  );
 }
 
 export function listProjects(): Promise<Project[]> {

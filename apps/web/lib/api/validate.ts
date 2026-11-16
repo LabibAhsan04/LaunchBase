@@ -3,13 +3,16 @@
 export type FieldErrors = {
   name?: string;
   repoUrl?: string;
+  fullName?: string;
   branch?: string;
 };
 
 export function validateProjectForm(input: {
   name: string;
   repoUrl: string;
+  fullName?: string;
   branch: string;
+  requireSelector?: boolean;
 }): FieldErrors {
   const errors: FieldErrors = {};
   const name = input.name.trim();
@@ -21,8 +24,13 @@ export function validateProjectForm(input: {
     errors.name = "Use letters, numbers, spaces, dashes, or underscores.";
   }
 
+  const fullName = (input.fullName || "").trim();
   const repoUrl = input.repoUrl.trim();
-  if (!repoUrl) {
+  if (input.requireSelector || fullName) {
+    if (!fullName) {
+      errors.fullName = "Select a repository.";
+    }
+  } else if (!repoUrl) {
     errors.repoUrl = "Repository URL is required.";
   } else if (!/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+(?:\.git)?\/?$/.test(repoUrl)) {
     errors.repoUrl = "Use https://github.com/owner/repo.";
@@ -46,5 +54,5 @@ export function validateDeployForm(input: { branch: string }): FieldErrors {
 }
 
 export function hasFieldErrors(errors: FieldErrors): boolean {
-  return Boolean(errors.name || errors.repoUrl || errors.branch);
+  return Boolean(errors.name || errors.repoUrl || errors.fullName || errors.branch);
 }

@@ -22,13 +22,15 @@ var (
 )
 
 type Project struct {
-	ID        string
-	OwnerID   string
-	Name      string
-	RepoURL   string
-	Branch    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             string
+	OwnerID        string
+	Name           string
+	RepoURL        string
+	Branch         string
+	InstallationID string
+	GitHubRepoID   int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Deployment struct {
@@ -126,10 +128,18 @@ func (db *DB) CreateProject(ctx context.Context, p Project) (Project, error) {
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
+	var installation any
+	var githubRepo any
+	if p.InstallationID != "" {
+		installation = p.InstallationID
+	}
+	if p.GitHubRepoID != 0 {
+		githubRepo = p.GitHubRepoID
+	}
 	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO projects (id, owner_id, name, repo_url, branch, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		p.ID, p.OwnerID, p.Name, p.RepoURL, p.Branch, p.CreatedAt, p.UpdatedAt)
+		INSERT INTO projects (id, owner_id, name, repo_url, branch, installation_id, github_repo_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		p.ID, p.OwnerID, p.Name, p.RepoURL, p.Branch, installation, githubRepo, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		if isUnique(err) {
 			return Project{}, ErrConflict
@@ -141,7 +151,7 @@ func (db *DB) CreateProject(ctx context.Context, p Project) (Project, error) {
 
 func (db *DB) ListProjects(ctx context.Context, ownerID string) ([]Project, error) {
 	rows, err := db.sql.QueryContext(ctx, `
-		SELECT id, owner_id, name, repo_url, branch, created_at, updated_at
+		SELECT id, owner_id, name, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
 		FROM projects
 		WHERE owner_id = $1
 		ORDER BY created_at DESC`, ownerID)
@@ -162,7 +172,7 @@ func (db *DB) ListProjects(ctx context.Context, ownerID string) ([]Project, erro
 
 func (db *DB) GetProject(ctx context.Context, ownerID, id string) (Project, error) {
 	row := db.sql.QueryRowContext(ctx, `
-		SELECT id, owner_id, name, repo_url, branch, created_at, updated_at
+		SELECT id, owner_id, name, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
 		FROM projects
 		WHERE owner_id = $1 AND id = $2`, ownerID, id)
 	p, err := scanProject(row)
@@ -245,6 +255,33 @@ func (db *DB) GetDeployment(ctx context.Context, ownerID, id string) (Deployment
 	return d, err
 }
 
+// GetDeploymentByID is for the worker. It does not check ownership.
+func (db *DB) GetDeploymentByID(ctx context.Context, id string) (Deployment, error) {
+	row := db.sql.QueryRowContext(ctx, `
+		SELECT id, project_id, status, repo_url, branch,
+			image_name, container_name, url, error_summary,
+			created_at, updated_at, finished_at
+		FROM deployments
+		WHERE id = $1`, id)
+	d, err := scanDeployment(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Deployment{}, ErrNotFound
+	}
+	return d, err
+}
+
+func (db *DB) GetProjectByID(ctx context.Context, id string) (Project, error) {
+	row := db.sql.QueryRowContext(ctx, `
+		SELECT id, owner_id, name, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
+		FROM projects
+		WHERE id = $1`, id)
+	p, err := scanProject(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Project{}, ErrNotFound
+	}
+	return p, err
+}
+
 func (db *DB) Transition(ctx context.Context, id, from, to string) error {
 	now := time.Now().UTC()
 	finished := to == "READY" || to == "FAILED" || to == "STOPPED" || to == "SUPERSEDED"
@@ -300,7 +337,7 @@ type scanner interface {
 
 func scanProject(s scanner) (Project, error) {
 	var p Project
-	err := s.Scan(&p.ID, &p.OwnerID, &p.Name, &p.RepoURL, &p.Branch, &p.CreatedAt, &p.UpdatedAt)
+	err := s.Scan(&p.ID, &p.OwnerID, &p.Name, &p.RepoURL, &p.Branch, &p.InstallationID, &p.GitHubRepoID, &p.CreatedAt, &p.UpdatedAt)
 	p.CreatedAt = p.CreatedAt.UTC()
 	p.UpdatedAt = p.UpdatedAt.UTC()
 	return p, err

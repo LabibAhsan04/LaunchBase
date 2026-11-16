@@ -71,7 +71,9 @@ export function useDeploymentStream(
       }
 
       setState(lastSeq.current > 0 ? "reconnecting" : "connecting");
-      source = new EventSource(logsStreamURL(deploymentId, lastSeq.current));
+      source = new EventSource(logsStreamURL(deploymentId, lastSeq.current), {
+        withCredentials: true,
+      });
 
       source.addEventListener("log", (event) => {
         try {

@@ -9,13 +9,16 @@ const JobVersion = 1
 
 // Job is the only thing Redis stores about a deployment.
 // The worker loads the row from Postgres and ignores the job if it does not match.
+// InstallationID is the GitHub App installation id used to mint a short-lived clone token.
+// The token itself is never stored in the job.
 type Job struct {
-	Version      int    `json:"version"`
-	DeploymentID string `json:"deploymentId"`
-	ProjectID    string `json:"projectId"`
-	RepoURL      string `json:"repoUrl"`
-	Branch       string `json:"branch"`
-	Attempt      int    `json:"attempt"`
+	Version        int    `json:"version"`
+	DeploymentID   string `json:"deploymentId"`
+	ProjectID      string `json:"projectId"`
+	RepoURL        string `json:"repoUrl"`
+	Branch         string `json:"branch"`
+	Attempt        int    `json:"attempt"`
+	InstallationID int64  `json:"installationId,omitempty"`
 }
 
 func (j Job) Validate() error {

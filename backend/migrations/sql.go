@@ -11,6 +11,9 @@ var outbox string
 //go:embed 0003_logs.sql
 var logs string
 
+//go:embed 0004_github_auth.sql
+var githubAuth string
+
 // File is one migration. Version is the key stored in schema_migrations.
 type File struct {
 	Version string
@@ -23,5 +26,6 @@ func All() []File {
 		{Version: "0001_initial", SQL: initial},
 		{Version: "0002_outbox", SQL: outbox},
 		{Version: "0003_logs", SQL: logs},
+		{Version: "0004_github_auth", SQL: githubAuth},
 	}
 }

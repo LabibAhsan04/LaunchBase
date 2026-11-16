@@ -10,21 +10,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
+
+func authCtx() context.Context {
+	return auth.WithUser(context.Background(), auth.User{
+		ID: store.LocalUserID, Login: "local", DisplayName: "Local Developer",
+	})
+}
 
 func TestBrokerOrdersAndRedacts(t *testing.T) {
 	db := testDB(t)
 	hub := logs.NewMemoryHub()
 	broker := &logs.Broker{Sink: db, Hub: hub, Secrets: []string{"sekrit-value"}}
 	svc := &service.Service{Store: db}
-	project, err := svc.CreateProject(context.Background(), "Demo", "https://github.com/acme/web", "main")
+	project, err := svc.CreateProject(authCtx(), service.CreateProjectInput{
+		Name: "Demo", RepoURL: "https://github.com/acme/web", Branch: "main",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dep, err := svc.CreateDeployment(context.Background(), project.ID, "main")
+	dep, err := svc.CreateDeployment(authCtx(), project.ID, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +92,7 @@ func TestUnauthorizedDeploymentHasNoLogs(t *testing.T) {
 	db := testDB(t)
 	broker := &logs.Broker{Sink: db, Hub: logs.NewMemoryHub()}
 	svc := &service.Service{Store: db, Logs: broker}
-	_, err := svc.ListLogs(context.Background(), "00000000-0000-4000-8000-000000000099", 0, 10)
+	_, err := svc.ListLogs(authCtx(), "00000000-0000-4000-8000-000000000099", 0, 10)
 	if err != store.ErrNotFound {
 		t.Fatalf("err %v", err)
 	}

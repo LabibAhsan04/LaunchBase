@@ -18,7 +18,7 @@ The API process opens Postgres, runs migrations, and publishes jobs to Redis. It
 
 A clone or Docker connection problem is retried up to 3 times. A build failure, a health-check failure, and an illegal status jump are stored as `FAILED` and copied to the stream `launchbase:jobs:dead`. They are not retried.
 
-There is no login yet. Every request is the seeded user `local` (`00000000-0000-4000-8000-000000000001`).
+With `AUTH_MODE=dev` (default), requests without a session cookie act as the seeded user `local` (`00000000-0000-4000-8000-000000000001`). With `AUTH_MODE=github`, project and deployment APIs require a signed-in session.
 
 ## Prerequisites
 
@@ -108,7 +108,7 @@ make dev-infra
 make api
 ```
 
-Create a project and read it back:
+Create a project and read it back (`AUTH_MODE=dev` needs no cookie):
 
 ```bash
 curl -s -X POST http://localhost:8080/api/v1/projects \
@@ -118,7 +118,7 @@ curl -s -X POST http://localhost:8080/api/v1/projects \
 curl -s http://localhost:8080/api/v1/projects
 ```
 
-`repoUrl` is stored as `https://github.com/acme/web.git`. SSH URLs and local paths are rejected with `400` and a JSON `error` object.
+Prefer `fullName` when the repo is linked through the GitHub App (`{"name":"Demo","fullName":"acme/web"}`). `repoUrl` is stored as `https://github.com/acme/web.git`. SSH URLs and local paths are rejected with `400` and a JSON `error` object.
 
 A deployment is created under a project. The response comes back as soon as the row is saved, with `status` `QUEUED`. `make worker` has to be running for the build to start. Build lines print in the worker terminal. Timeouts and container limits come from the same variables as `make worker-once` (`CLONE_TIMEOUT`, `BUILD_TIMEOUT`, `START_TIMEOUT`, `DEPLOYMENT_MEMORY_LIMIT`, `DEPLOYMENT_CPU_LIMIT`, `DEPLOYMENT_PIDS_LIMIT`). `make api` and `make worker` do not load `.env` by themselves. With those variables unset, the defaults are 1 minute to clone, 10 minutes to build, 1 minute to start, 512m memory, 1 CPU, and 128 processes.
 
@@ -150,13 +150,42 @@ Lines are stored in Postgres with a per-deployment sequence number. Each deploym
 Open http://localhost:3000 after `make web`. Pages:
 
 - `/` project list
-- `/projects/new` create a project
+- `/login` GitHub sign-in
+- `/install-github` GitHub App install explanation
+- `/projects/new` create a project (repository and branch selectors when installed)
 - `/projects/[projectId]` project detail and deploy form
 - `/deployments/[deploymentId]` status, live logs, URL, error, stop
-- `/settings` placeholder
+- `/settings` account links
 
-Status uses the same values as the API. The deployment page opens an SSE log stream and polls status every 10 seconds as a fallback.
+Status uses the same values as the API. The deployment page opens an SSE log stream (with cookies) and polls status every 10 seconds as a fallback.
 
 Screenshots for the README: with the API and worker running, create a project, queue a deploy, open the deployment page while logs are scrolling, then again when it is `READY` or `FAILED`. Save the images under `docs/screenshots/` when you have them. That folder is not required for the app to run.
 
-GitHub login is later work. The queue is Redis, and the worker is a separate process from the API.
+## GitHub App
+
+Create a GitHub App for local development (do not commit the private key):
+
+1. GitHub → Settings → Developer settings → GitHub Apps → New GitHub App.
+2. Homepage URL: `http://localhost:3000`
+3. Callback URL: `http://localhost:8080/api/v1/auth/callback`
+4. Setup URL (optional): `http://localhost:3000/install-github`
+5. Webhook URL: `http://localhost:8080/api/v1/webhooks/github` (use a tunnel such as ngrok for real delivery)
+6. Webhook secret: set `GITHUB_WEBHOOK_SECRET` to the same value
+7. Permissions: Repository → Metadata (read), Contents (read). Subscribe to `installation` and `installation_repositories`.
+8. Where can this App be installed: Only on this account (or Any account for demos)
+9. After create: note App ID, Client ID, generate a Client secret, generate a private key, set the slug
+
+Put the values in `.env`:
+
+```bash
+AUTH_MODE=github
+API_PUBLIC_URL=http://localhost:8080
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/private-key.pem
+GITHUB_WEBHOOK_SECRET=
+```
+
+Sign in from `/login`, install from `/install-github`, then create a project from the repository selector. The worker mints a short-lived installation token for private clones and passes it as an HTTP Authorization header so it never lands in the stored remote URL or browser logs.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/httpapi"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
@@ -68,11 +69,20 @@ func main() {
 		Secrets: logs.SecretsFromEnv(),
 	}
 
+	gh, err := github.ClientFromEnv()
+	if err != nil {
+		log.Fatalf("github: %v", err)
+	}
+	if gh == nil {
+		log.Printf("github app is not configured; AUTH_MODE=dev still works for the local user")
+	}
+
 	svc := &service.Service{
 		Store:   db,
 		Remover: dockerengine.Client{},
 		Log:     os.Stdout,
 		Logs:    broker,
+		GitHub:  gh,
 		Flush: func(ctx context.Context) error {
 			_, err := db.PublishPending(ctx, func(payload []byte) error {
 				return stream.Publish(ctx, payload)
@@ -83,7 +93,7 @@ func main() {
 	go publishLoop(db, stream)
 
 	log.Printf("api listening on %s", addr)
-	if err := http.ListenAndServe(addr, httpapi.NewMux(svc)); err != nil {
+	if err := http.ListenAndServe(addr, httpapi.NewMuxWithGitHub(svc, gh)); err != nil {
 		log.Fatal(err)
 	}
 }

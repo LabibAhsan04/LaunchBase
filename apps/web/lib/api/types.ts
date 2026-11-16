@@ -49,8 +49,39 @@ export type ApiErrorBody = {
 
 export type CreateProjectInput = {
   name: string;
-  repoUrl: string;
+  repoUrl?: string;
+  fullName?: string;
   branch?: string;
+};
+
+export type AuthMe = {
+  id: string;
+  login: string;
+  displayName: string;
+  avatarUrl: string;
+  authMode: string;
+};
+
+export type RepoAccess = {
+  installationId: string;
+  installationGhid: number;
+  githubRepoId: number;
+  owner: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+};
+
+export type InstallationList = {
+  installations: Array<{
+    id: string;
+    installationId: number;
+    accountLogin: string;
+    accountType: string;
+    suspended: boolean;
+  }>;
+  installUrl: string;
 };
 
 export type CreateDeploymentInput = {

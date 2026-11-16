@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
@@ -42,33 +43,99 @@ type Service struct {
 	Remover Remover
 	Log     io.Writer
 	Logs    *logs.Broker
+	GitHub  *github.Client
 	// Flush publishes one outbox row. The deployment is already committed if this fails.
 	Flush func(context.Context) error
 }
 
-func (s *Service) CreateProject(ctx context.Context, name, repoURL, branch string) (store.Project, error) {
-	name = strings.TrimSpace(name)
+type CreateProjectInput struct {
+	Name     string
+	RepoURL  string
+	FullName string
+	Branch   string
+}
+
+func ownerID(ctx context.Context) (string, error) {
+	u, ok := auth.UserFrom(ctx)
+	if !ok || u.ID == "" {
+		return "", auth.ErrUnauthorized
+	}
+	return u.ID, nil
+}
+
+func (s *Service) CreateProject(ctx context.Context, in CreateProjectInput) (store.Project, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return store.Project{}, err
+	}
+	name := strings.TrimSpace(in.Name)
 	if !validProjectName(name) {
 		return store.Project{}, InputError{Message: "name must be 1-40 letters, numbers, spaces, dashes, or underscores"}
 	}
-	repo, err := github.ParseRepoURL(repoURL)
+	branch, err := github.ParseBranch(strings.TrimSpace(in.Branch))
 	if err != nil {
 		return store.Project{}, InputError{Message: err.Error()}
 	}
-	branch, err = github.ParseBranch(strings.TrimSpace(branch))
-	if err != nil {
-		return store.Project{}, InputError{Message: err.Error()}
+
+	var installationID string
+	var githubRepoID int64
+	var cloneURL string
+
+	fullName := strings.TrimSpace(in.FullName)
+	if fullName == "" && strings.TrimSpace(in.RepoURL) != "" {
+		parsed, err := github.ParseRepoURL(in.RepoURL)
+		if err != nil {
+			return store.Project{}, InputError{Message: err.Error()}
+		}
+		fullName = parsed.Owner + "/" + parsed.Name
+		cloneURL = parsed.CloneURL
 	}
+
+	if fullName != "" {
+		access, err := s.Store.GetRepoForUser(ctx, owner, fullName)
+		if err == nil {
+			installationID = access.InstallationID
+			githubRepoID = access.GitHubRepoID
+			cloneURL = "https://github.com/" + access.FullName + ".git"
+			if branch == "" {
+				branch = access.DefaultBranch
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return store.Project{}, err
+		} else if auth.RequiresGitHub() {
+			return store.Project{}, InputError{Message: "repository is not available through your GitHub App installation"}
+		}
+	}
+
+	if cloneURL == "" && fullName != "" {
+		if _, err := github.ParseRepoURL("https://github.com/" + fullName); err != nil {
+			return store.Project{}, InputError{Message: "repository full name is invalid"}
+		}
+		cloneURL = "https://github.com/" + fullName + ".git"
+	}
+	if cloneURL == "" {
+		repo, err := github.ParseRepoURL(in.RepoURL)
+		if err != nil {
+			return store.Project{}, InputError{Message: err.Error()}
+		}
+		cloneURL = repo.CloneURL
+	}
+	if auth.RequiresGitHub() && installationID == "" {
+		return store.Project{}, InputError{Message: "select a repository from your GitHub App installation"}
+	}
+
 	id, err := newID()
 	if err != nil {
 		return store.Project{}, err
 	}
 	project, err := s.Store.CreateProject(ctx, store.Project{
-		ID:      id,
-		OwnerID: store.LocalUserID,
-		Name:    name,
-		RepoURL: repo.CloneURL,
-		Branch:  branch,
+		ID:             id,
+		OwnerID:        owner,
+		Name:           name,
+		RepoURL:        cloneURL,
+		Branch:         branch,
+		InstallationID: installationID,
+		GitHubRepoID:   githubRepoID,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
@@ -76,23 +143,31 @@ func (s *Service) CreateProject(ctx context.Context, name, repoURL, branch strin
 		}
 		return store.Project{}, err
 	}
-	_ = s.audit(ctx, "project.created", project.ID, "", project.RepoURL)
+	_ = s.audit(ctx, owner, "project.created", project.ID, "", project.RepoURL)
 	return project, nil
 }
 
 func (s *Service) ListProjects(ctx context.Context) ([]store.Project, error) {
-	return s.Store.ListProjects(ctx, store.LocalUserID)
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Store.ListProjects(ctx, owner)
 }
 
 func (s *Service) GetProject(ctx context.Context, id string) (store.Project, []store.Deployment, error) {
-	if !validUUID(id) {
-		return store.Project{}, nil, store.ErrNotFound
-	}
-	project, err := s.Store.GetProject(ctx, store.LocalUserID, id)
+	owner, err := ownerID(ctx)
 	if err != nil {
 		return store.Project{}, nil, err
 	}
-	deps, err := s.Store.ListDeployments(ctx, store.LocalUserID, id)
+	if !validUUID(id) {
+		return store.Project{}, nil, store.ErrNotFound
+	}
+	project, err := s.Store.GetProject(ctx, owner, id)
+	if err != nil {
+		return store.Project{}, nil, err
+	}
+	deps, err := s.Store.ListDeployments(ctx, owner, id)
 	if err != nil {
 		return store.Project{}, nil, err
 	}
@@ -100,10 +175,14 @@ func (s *Service) GetProject(ctx context.Context, id string) (store.Project, []s
 }
 
 func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string) (store.Deployment, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return store.Deployment{}, err
+	}
 	if !validUUID(projectID) {
 		return store.Deployment{}, store.ErrNotFound
 	}
-	project, err := s.Store.GetProject(ctx, store.LocalUserID, projectID)
+	project, err := s.Store.GetProject(ctx, owner, projectID)
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -116,6 +195,18 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 		return store.Deployment{}, InputError{Message: err.Error()}
 	}
 
+	var installationGHID int64
+	if project.InstallationID != "" {
+		inst, err := s.Store.GetInstallation(ctx, project.InstallationID)
+		if err != nil {
+			return store.Deployment{}, err
+		}
+		if inst.Suspended {
+			return store.Deployment{}, InputError{Message: "GitHub App installation is suspended"}
+		}
+		installationGHID = inst.InstallationID
+	}
+
 	id, err := newID()
 	if err != nil {
 		return store.Deployment{}, err
@@ -125,12 +216,13 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 		return store.Deployment{}, err
 	}
 	payload, err := json.Marshal(queue.Job{
-		Version:      queue.JobVersion,
-		DeploymentID: id,
-		ProjectID:    project.ID,
-		RepoURL:      project.RepoURL,
-		Branch:       branch,
-		Attempt:      1,
+		Version:        queue.JobVersion,
+		DeploymentID:   id,
+		ProjectID:      project.ID,
+		RepoURL:        project.RepoURL,
+		Branch:         branch,
+		Attempt:        1,
+		InstallationID: installationGHID,
 	})
 	if err != nil {
 		return store.Deployment{}, err
@@ -145,7 +237,7 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 	if err != nil {
 		return store.Deployment{}, err
 	}
-	_ = s.audit(ctx, "deployment.created", project.ID, dep.ID, dep.RepoURL)
+	_ = s.audit(ctx, owner, "deployment.created", project.ID, dep.ID, dep.RepoURL)
 	if s.Flush != nil {
 		if err := s.Flush(ctx); err != nil && s.Log != nil {
 			fmt.Fprintf(s.Log, "queue: %v\n", err)
@@ -155,10 +247,14 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 }
 
 func (s *Service) GetDeployment(ctx context.Context, id string) (store.Deployment, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return store.Deployment{}, err
+	}
 	if !validUUID(id) {
 		return store.Deployment{}, store.ErrNotFound
 	}
-	return s.Store.GetDeployment(ctx, store.LocalUserID, id)
+	return s.Store.GetDeployment(ctx, owner, id)
 }
 
 func (s *Service) ListLogs(ctx context.Context, deploymentID string, afterSeq int64, limit int) ([]logs.Event, error) {
@@ -172,6 +268,10 @@ func (s *Service) ListLogs(ctx context.Context, deploymentID string, afterSeq in
 }
 
 func (s *Service) StopDeployment(ctx context.Context, id string) (store.Deployment, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return store.Deployment{}, err
+	}
 	dep, err := s.GetDeployment(ctx, id)
 	if err != nil {
 		return store.Deployment{}, err
@@ -187,18 +287,59 @@ func (s *Service) StopDeployment(ctx context.Context, id string) (store.Deployme
 	if err := s.Store.Transition(ctx, dep.ID, dep.Status, string(deployments.StatusStopped)); err != nil {
 		return store.Deployment{}, err
 	}
-	_ = s.audit(ctx, "deployment.stopped", dep.ProjectID, dep.ID, dep.ContainerName)
-	return s.Store.GetDeployment(ctx, store.LocalUserID, dep.ID)
+	_ = s.audit(ctx, owner, "deployment.stopped", dep.ProjectID, dep.ID, dep.ContainerName)
+	return s.Store.GetDeployment(ctx, owner, dep.ID)
 }
 
-func (s *Service) audit(ctx context.Context, action, projectID, deploymentID, detail string) error {
+func (s *Service) ListAccessibleRepos(ctx context.Context) ([]store.RepoAccess, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Store.ListReposForUser(ctx, owner)
+}
+
+func (s *Service) ListRepoBranches(ctx context.Context, fullName string) ([]github.Branch, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	access, err := s.Store.GetRepoForUser(ctx, owner, fullName)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+	if s.GitHub == nil {
+		if access.DefaultBranch != "" {
+			return []github.Branch{{Name: access.DefaultBranch}}, nil
+		}
+		return []github.Branch{}, nil
+	}
+	tok, err := s.GitHub.CreateInstallationToken(ctx, access.InstallationGHID)
+	if err != nil {
+		return nil, fmt.Errorf("installation token: %w", err)
+	}
+	return s.GitHub.ListRepoBranches(ctx, tok.Token, access.OwnerLogin, access.Name)
+}
+
+func (s *Service) ListInstallations(ctx context.Context) ([]store.Installation, error) {
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Store.ListInstallationsForUser(ctx, owner)
+}
+
+func (s *Service) audit(ctx context.Context, actorID, action, projectID, deploymentID, detail string) error {
 	id, err := newID()
 	if err != nil {
 		return err
 	}
 	return s.Store.AddAudit(ctx, store.Audit{
 		ID:           id,
-		ActorID:      store.LocalUserID,
+		ActorID:      actorID,
 		Action:       action,
 		ProjectID:    projectID,
 		DeploymentID: deploymentID,

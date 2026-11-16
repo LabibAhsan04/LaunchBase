@@ -23,6 +23,7 @@ type Options struct {
 	Branch       string
 	ID           string // optional. the api sets this so the row and the container share an id.
 	LocalDir     string // integration test only. the cli does not set this.
+	CloneToken   string // short-lived installation token; never logged or stored in git remote
 	OnStatus     func(Status) error
 	Port         int
 	HealthPath   string
@@ -157,7 +158,7 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		}
 		opt.logf("cloning %s", cloneURL)
 		cloneCtx, cancel := context.WithTimeout(ctx, opt.CloneTimeout)
-		err = cloneRepo(cloneCtx, engine.Runner, cloneURL, opt.Branch, cloned, opt.Stdout)
+		err = cloneRepo(cloneCtx, engine.Runner, cloneURL, opt.Branch, cloned, opt.CloneToken, opt.Stdout)
 		cancel()
 		if err != nil {
 			return Result{}, err
@@ -322,8 +323,13 @@ func (o Options) advance(d *Deployment, to Status) error {
 	return nil
 }
 
-func cloneArgs(cloneURL, branch, dest string) []string {
-	args := []string{"clone", "--depth", "1", "--single-branch"}
+func cloneArgs(cloneURL, branch, dest, token string) []string {
+	args := []string{}
+	if token != "" {
+		// Header auth keeps the token out of the remote URL and git config.
+		args = append(args, "-c", "http.extraHeader=Authorization: Bearer "+token)
+	}
+	args = append(args, "clone", "--depth", "1", "--single-branch")
 	if branch != "" {
 		args = append(args, "--branch", branch)
 	}
@@ -331,11 +337,11 @@ func cloneArgs(cloneURL, branch, dest string) []string {
 	return args
 }
 
-func cloneRepo(ctx context.Context, run dockerengine.Runner, cloneURL, branch, dest string, log io.Writer) error {
+func cloneRepo(ctx context.Context, run dockerengine.Runner, cloneURL, branch, dest, token string, log io.Writer) error {
 	if run == nil {
 		run = dockerengine.Local{}
 	}
-	_, err := run.Run(ctx, "git", cloneArgs(cloneURL, branch, dest), log, log)
+	_, err := run.Run(ctx, "git", cloneArgs(cloneURL, branch, dest, token), log, log)
 	if err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
