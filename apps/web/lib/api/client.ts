@@ -169,6 +169,22 @@ export function stopDeployment(deploymentId: string): Promise<Deployment> {
   );
 }
 
+export function redeployDeployment(deploymentId: string): Promise<Deployment> {
+  return request(
+    `/api/v1/deployments/${deploymentId}/redeploy`,
+    { method: "POST" },
+    (data) => deploymentSchema.parse(data),
+  );
+}
+
+export function rollbackDeployment(deploymentId: string): Promise<Deployment> {
+  return request(
+    `/api/v1/deployments/${deploymentId}/rollback`,
+    { method: "POST" },
+    (data) => deploymentSchema.parse(data),
+  );
+}
+
 export function listLogs(deploymentId: string, after = 0): Promise<DeploymentLog[]> {
   return request(
     `/api/v1/deployments/${deploymentId}/logs?after=${after}`,

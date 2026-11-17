@@ -25,6 +25,7 @@ type Project struct {
 	ID             string
 	OwnerID        string
 	Name           string
+	Slug           string
 	RepoURL        string
 	Branch         string
 	InstallationID string
@@ -42,6 +43,7 @@ type Deployment struct {
 	ImageName     string
 	ContainerName string
 	URL           string
+	Hostname      string
 	ErrorSummary  string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -137,9 +139,9 @@ func (db *DB) CreateProject(ctx context.Context, p Project) (Project, error) {
 		githubRepo = p.GitHubRepoID
 	}
 	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO projects (id, owner_id, name, repo_url, branch, installation_id, github_repo_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		p.ID, p.OwnerID, p.Name, p.RepoURL, p.Branch, installation, githubRepo, p.CreatedAt, p.UpdatedAt)
+		INSERT INTO projects (id, owner_id, name, slug, repo_url, branch, installation_id, github_repo_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		p.ID, p.OwnerID, p.Name, p.Slug, p.RepoURL, p.Branch, installation, githubRepo, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		if isUnique(err) {
 			return Project{}, ErrConflict
@@ -151,7 +153,7 @@ func (db *DB) CreateProject(ctx context.Context, p Project) (Project, error) {
 
 func (db *DB) ListProjects(ctx context.Context, ownerID string) ([]Project, error) {
 	rows, err := db.sql.QueryContext(ctx, `
-		SELECT id, owner_id, name, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
+		SELECT id, owner_id, name, slug, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
 		FROM projects
 		WHERE owner_id = $1
 		ORDER BY created_at DESC`, ownerID)
@@ -172,7 +174,7 @@ func (db *DB) ListProjects(ctx context.Context, ownerID string) ([]Project, erro
 
 func (db *DB) GetProject(ctx context.Context, ownerID, id string) (Project, error) {
 	row := db.sql.QueryRowContext(ctx, `
-		SELECT id, owner_id, name, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
+		SELECT id, owner_id, name, slug, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
 		FROM projects
 		WHERE owner_id = $1 AND id = $2`, ownerID, id)
 	p, err := scanProject(row)
@@ -219,7 +221,7 @@ func (db *DB) CreateDeployment(ctx context.Context, d Deployment, outboxID strin
 func (db *DB) ListDeployments(ctx context.Context, ownerID, projectID string) ([]Deployment, error) {
 	rows, err := db.sql.QueryContext(ctx, `
 		SELECT d.id, d.project_id, d.status, d.repo_url, d.branch,
-			d.image_name, d.container_name, d.url, d.error_summary,
+			d.image_name, d.container_name, d.url, d.hostname, d.error_summary,
 			d.created_at, d.updated_at, d.finished_at
 		FROM deployments d
 		JOIN projects p ON p.id = d.project_id
@@ -243,7 +245,7 @@ func (db *DB) ListDeployments(ctx context.Context, ownerID, projectID string) ([
 func (db *DB) GetDeployment(ctx context.Context, ownerID, id string) (Deployment, error) {
 	row := db.sql.QueryRowContext(ctx, `
 		SELECT d.id, d.project_id, d.status, d.repo_url, d.branch,
-			d.image_name, d.container_name, d.url, d.error_summary,
+			d.image_name, d.container_name, d.url, d.hostname, d.error_summary,
 			d.created_at, d.updated_at, d.finished_at
 		FROM deployments d
 		JOIN projects p ON p.id = d.project_id
@@ -259,7 +261,7 @@ func (db *DB) GetDeployment(ctx context.Context, ownerID, id string) (Deployment
 func (db *DB) GetDeploymentByID(ctx context.Context, id string) (Deployment, error) {
 	row := db.sql.QueryRowContext(ctx, `
 		SELECT id, project_id, status, repo_url, branch,
-			image_name, container_name, url, error_summary,
+			image_name, container_name, url, hostname, error_summary,
 			created_at, updated_at, finished_at
 		FROM deployments
 		WHERE id = $1`, id)
@@ -272,7 +274,7 @@ func (db *DB) GetDeploymentByID(ctx context.Context, id string) (Deployment, err
 
 func (db *DB) GetProjectByID(ctx context.Context, id string) (Project, error) {
 	row := db.sql.QueryRowContext(ctx, `
-		SELECT id, owner_id, name, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
+		SELECT id, owner_id, name, slug, repo_url, branch, COALESCE(installation_id::text, ''), COALESCE(github_repo_id, 0), created_at, updated_at
 		FROM projects
 		WHERE id = $1`, id)
 	p, err := scanProject(row)
@@ -304,12 +306,47 @@ func (db *DB) Transition(ctx context.Context, id, from, to string) error {
 	return nil
 }
 
-func (db *DB) SetResult(ctx context.Context, id, image, container, rawURL string) error {
+func (db *DB) SetResult(ctx context.Context, id, image, container, rawURL, hostname string) error {
 	_, err := db.sql.ExecContext(ctx, `
 		UPDATE deployments
-		SET image_name = $1, container_name = $2, url = $3, updated_at = $4
-		WHERE id = $5`, image, container, rawURL, time.Now().UTC(), id)
+		SET image_name = $1, container_name = $2, url = $3, hostname = $4, updated_at = $5
+		WHERE id = $6`, image, container, rawURL, hostname, time.Now().UTC(), id)
 	return err
+}
+
+// ListReadyDeployments returns READY deployments for a project, newest first.
+func (db *DB) ListReadyDeployments(ctx context.Context, projectID string) ([]Deployment, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT id, project_id, status, repo_url, branch,
+			image_name, container_name, url, hostname, error_summary,
+			created_at, updated_at, finished_at
+		FROM deployments
+		WHERE project_id = $1 AND status = 'READY'
+		ORDER BY created_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Deployment{}
+	for rows.Next() {
+		d, err := scanDeployment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) SlugTaken(ctx context.Context, slug string, exceptID string) (bool, error) {
+	row := db.sql.QueryRowContext(ctx, `
+		SELECT 1 FROM projects WHERE slug = $1 AND id <> $2 LIMIT 1`, slug, exceptID)
+	var n int
+	err := row.Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (db *DB) SetError(ctx context.Context, id, summary string) error {
@@ -337,7 +374,7 @@ type scanner interface {
 
 func scanProject(s scanner) (Project, error) {
 	var p Project
-	err := s.Scan(&p.ID, &p.OwnerID, &p.Name, &p.RepoURL, &p.Branch, &p.InstallationID, &p.GitHubRepoID, &p.CreatedAt, &p.UpdatedAt)
+	err := s.Scan(&p.ID, &p.OwnerID, &p.Name, &p.Slug, &p.RepoURL, &p.Branch, &p.InstallationID, &p.GitHubRepoID, &p.CreatedAt, &p.UpdatedAt)
 	p.CreatedAt = p.CreatedAt.UTC()
 	p.UpdatedAt = p.UpdatedAt.UTC()
 	return p, err
@@ -347,7 +384,7 @@ func scanDeployment(s scanner) (Deployment, error) {
 	var d Deployment
 	err := s.Scan(
 		&d.ID, &d.ProjectID, &d.Status, &d.RepoURL, &d.Branch,
-		&d.ImageName, &d.ContainerName, &d.URL, &d.ErrorSummary,
+		&d.ImageName, &d.ContainerName, &d.URL, &d.Hostname, &d.ErrorSummary,
 		&d.CreatedAt, &d.UpdatedAt, &d.FinishedAt,
 	)
 	d.CreatedAt = d.CreatedAt.UTC()

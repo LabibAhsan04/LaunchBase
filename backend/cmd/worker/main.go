@@ -110,10 +110,12 @@ func runQueue() {
 	}
 
 	name := workerName()
+	engine := dockerengine.Client{}
 	proc := &deployments.Processor{
 		Store:  db,
 		Run:    deployments.Run,
-		Remove: dockerengine.Client{},
+		Remove: engine,
+		Images: engine,
 		Log:    os.Stdout,
 		Logs:   broker,
 		Owner:  name,
@@ -125,6 +127,8 @@ func runQueue() {
 			Memory:       envString("DEPLOYMENT_MEMORY_LIMIT", "512m"),
 			CPUs:         envString("DEPLOYMENT_CPU_LIMIT", "1.0"),
 			PIDs:         envString("DEPLOYMENT_PIDS_LIMIT", "128"),
+			BaseDomain:   envString("BASE_DOMAIN", dockerengine.DefaultBaseDomain),
+			Network:      envString("RUNTIME_NETWORK", dockerengine.DefaultRuntimeNetwork),
 		},
 	}
 	consumer := &queue.Consumer{

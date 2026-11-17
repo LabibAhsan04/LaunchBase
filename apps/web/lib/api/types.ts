@@ -18,6 +18,7 @@ export type DeploymentStatus = (typeof DEPLOYMENT_STATUSES)[number];
 export type Project = {
   id: string;
   name: string;
+  slug: string;
   repoUrl: string;
   branch: string;
   createdAt: string;
@@ -34,6 +35,7 @@ export type Deployment = {
   image?: string;
   container?: string;
   url?: string;
+  hostname?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;

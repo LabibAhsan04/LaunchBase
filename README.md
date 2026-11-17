@@ -61,18 +61,18 @@ The repository has to be public, on `https://github.com/owner/name`, and it need
 REPO=https://github.com/owner/name BRANCH=main make worker-once
 ```
 
-`BRANCH` can be left off. The command clones with `--depth 1`, builds an image named `launchbase/<id>`, and starts a container named `launchbase-<id>`. The container is not privileged. It gets a memory limit, a CPU limit, a process limit, a read-only root filesystem, and a writable `/tmp`. Docker picks a free port on `127.0.0.1`.
+`BRANCH` can be left off. The command clones with `--depth 1`, builds an image named `launchbase/<id>`, and starts a container named `launchbase-<id>`. The container is not privileged. It gets a memory limit, a CPU limit, a process limit, a read-only root filesystem, and a writable `/tmp`. It joins the `launchbase-runtime` network with Traefik labels (not the Postgres/Redis network) and is not published on the host.
 
-When the app answers, the worker prints:
+When the app answers through Traefik, the worker prints:
 
 ```text
 id=...
 image=launchbase/...
 container=launchbase-...
-url=http://127.0.0.1:<port>/
+url=http://app.launchbase.localhost/
 ```
 
-That URL is the app. Traefik is not in front of it yet. If the build or the health check fails, the worker removes the container and the image, deletes the temp clone, and exits non-zero.
+Project URLs use `{slug}.launchbase.localhost` on port 80. A deployment-specific host `{slug}-{shortid}.launchbase.localhost` is used for the health check. If the build or the health check fails, the worker removes the container and the image, deletes the temp clone, and exits non-zero.
 
 Ctrl-C cancels the clone or the build. A container that was already started is removed.
 
@@ -128,13 +128,15 @@ curl -s -X POST http://localhost:8080/api/v1/projects/PROJECT_ID/deployments \
   -d '{"branch":"main"}'
 ```
 
-Poll `GET /api/v1/deployments/DEPLOYMENT_ID` until `status` is `READY` or `FAILED`. A ready deployment has a localhost `url`. A failed one has `error`. Stop a ready deployment with:
+Poll `GET /api/v1/deployments/DEPLOYMENT_ID` until `status` is `READY` or `FAILED`. A ready deployment has a Traefik `url` like `http://demo.launchbase.localhost/`. A failed one has `error`. Stop, redeploy, or roll back with:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/stop
+curl -s -X POST http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/redeploy
+curl -s -X POST http://localhost:8080/api/v1/deployments/DEPLOYMENT_ID/rollback
 ```
 
-Stopping anything that is not `READY` returns `409`. The status list is the same one the worker uses. `QUEUED` cannot jump to `READY`. The contract is `docs/openapi.yaml`.
+`redeploy` queues a new build from the project settings. `rollback` queues a new immutable deployment using that deployment's stored repo URL and branch. When a replacement becomes `READY`, the previous `READY` deployment is marked `SUPERSEDED` and its container is removed. Stopping anything that is not `READY` returns `409`. The contract is `docs/openapi.yaml`.
 
 Build logs for a deployment:
 
@@ -154,7 +156,7 @@ Open http://localhost:3000 after `make web`. Pages:
 - `/install-github` GitHub App install explanation
 - `/projects/new` create a project (repository and branch selectors when installed)
 - `/projects/[projectId]` project detail and deploy form
-- `/deployments/[deploymentId]` status, live logs, URL, error, stop
+- `/deployments/[deploymentId]` status, live logs, URL, Open/Stop/Redeploy/Roll back
 - `/settings` account links
 
 Status uses the same values as the API. The deployment page opens an SSE log stream (with cookies) and polls status every 10 seconds as a fallback.

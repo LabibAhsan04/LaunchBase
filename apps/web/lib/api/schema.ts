@@ -13,6 +13,7 @@ export const deploymentSchema = z.object({
   image: z.string().optional(),
   container: z.string().optional(),
   url: z.string().optional(),
+  hostname: z.string().optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -22,6 +23,7 @@ export const deploymentSchema = z.object({
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
+  slug: z.string(),
   repoUrl: z.string(),
   branch: z.string(),
   createdAt: z.string(),
