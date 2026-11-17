@@ -78,7 +78,7 @@ func TestProjectAndDeploymentFlow(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &dep); err != nil {
 		t.Fatal(err)
 	}
-	if dep.Status != "READY" || dep.URL != "http://127.0.0.1:34567/" {
+	if dep.Status != "READY" || dep.URL != "http://demo.launchbase.localhost/" {
 		t.Fatalf("%+v", dep)
 	}
 	if dep.FinishedAt == nil || dep.FinishedAt.Location() != time.UTC {
@@ -162,7 +162,7 @@ func advanceToReady(t *testing.T, db *store.DB, id string) {
 		}
 		cur = next
 	}
-	if err := db.SetResult(context.Background(), id, "launchbase/test", "launchbase-test", "http://127.0.0.1:34567/"); err != nil {
+	if err := db.SetResult(context.Background(), id, "launchbase/test", "launchbase-test", "http://demo.launchbase.localhost/", "demo.launchbase.localhost"); err != nil {
 		t.Fatal(err)
 	}
 }

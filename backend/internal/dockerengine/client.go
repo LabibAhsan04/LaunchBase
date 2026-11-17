@@ -74,14 +74,16 @@ func buildArgs(dir, tag string) []string {
 }
 
 type RunSpec struct {
-	Name   string
-	Image  string
-	Port   string
-	Memory string
-	CPUs   string
-	PIDs   string
-	User   string
-	Tmpfs  []string
+	Name    string
+	Image   string
+	Port    string
+	Memory  string
+	CPUs    string
+	PIDs    string
+	User    string
+	Tmpfs   []string
+	Network string
+	Labels  map[string]string
 }
 
 func (c Client) Start(ctx context.Context, spec RunSpec) error {
@@ -102,17 +104,30 @@ func (c Client) Start(ctx context.Context, spec RunSpec) error {
 }
 
 func containerRunArgs(s RunSpec) []string {
-	// 127.0.0.1::port lets docker pick a free localhost port.
+	// Runtime containers join the Traefik network and get labels.
+	// They are not published on the host and never join the infra network with Postgres/Redis.
 	// read-only root, with /tmp writable, because a lot of images still need a scratch dir.
+	network := s.Network
+	if network == "" {
+		network = RuntimeNetwork()
+	}
 	args := []string{
 		"run", "-d",
 		"--name", s.Name,
+		"--network", network,
 		"--memory", s.Memory,
 		"--cpus", s.CPUs,
 		"--pids-limit", s.PIDs,
 		"--read-only",
 		"--tmpfs", "/tmp",
-		"-p", "127.0.0.1::" + s.Port,
+	}
+	keys := make([]string, 0, len(s.Labels))
+	for k := range s.Labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--label", k+"="+s.Labels[k])
 	}
 	for _, dir := range s.Tmpfs {
 		args = append(args, "--tmpfs", dir)

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     AUTH_MODE=dev (default) acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`) when no session cookie is present.
@@ -11,6 +11,9 @@ info:
     Creating a deployment stores a QUEUED row and returns immediately.
     A separate worker builds the repository and moves the row to READY or FAILED.
     Private clones use a short-lived GitHub App installation token on the worker only.
+    READY deployments are routed by Traefik on `{slug}.launchbase.localhost`.
+    Redeploy and rollback queue new immutable deployments; a successful cutover marks
+    the previous READY deployment SUPERSEDED.
 servers:
   - url: http://localhost:8080
 paths:
@@ -135,6 +138,7 @@ paths:
                 projects:
                   - id: 6f1c3b2a-1111-4111-8111-111111111111
                     name: Demo
+                    slug: demo
                     repoUrl: https://github.com/acme/web.git
                     branch: main
                     createdAt: "2026-10-27T18:00:00Z"
@@ -172,6 +176,7 @@ paths:
               example:
                 id: 6f1c3b2a-1111-4111-8111-111111111111
                 name: Demo
+                slug: demo
                 repoUrl: https://github.com/acme/web.git
                 branch: main
                 createdAt: "2026-10-27T18:00:00Z"
@@ -195,6 +200,7 @@ paths:
               example:
                 id: 6f1c3b2a-1111-4111-8111-111111111111
                 name: Demo
+                slug: demo
                 repoUrl: https://github.com/acme/web.git
                 branch: main
                 createdAt: "2026-10-27T18:00:00Z"
@@ -207,7 +213,8 @@ paths:
                     branch: main
                     image: launchbase/7a2d4c3b-2222-4222-8222-222222222222
                     container: launchbase-7a2d4c3b-2222-4222-8222-222222222222
-                    url: http://127.0.0.1:34567/
+                    url: http://demo.launchbase.localhost/
+                    hostname: demo.launchbase.localhost
                     createdAt: "2026-10-27T18:01:00Z"
                     updatedAt: "2026-10-27T18:04:00Z"
                     finishedAt: "2026-10-27T18:04:00Z"
@@ -263,6 +270,28 @@ paths:
                 error:
                   code: conflict
                   message: that status change is not allowed
+  /api/v1/deployments/{deploymentId}/redeploy:
+    post:
+      summary: Queue a new deployment from the project settings
+      parameters:
+        - $ref: "#/components/parameters/DeploymentId"
+      responses:
+        "201":
+          description: New QUEUED deployment
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/deployments/{deploymentId}/rollback:
+    post:
+      summary: Queue a new deployment from this deployment's immutable repo/branch
+      parameters:
+        - $ref: "#/components/parameters/DeploymentId"
+      responses:
+        "201":
+          description: New QUEUED deployment
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/deployments/{deploymentId}/logs:
     get:
       summary: List stored build logs

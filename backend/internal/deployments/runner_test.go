@@ -127,8 +127,11 @@ func TestDeployHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.URL != "http://127.0.0.1:34567/health" {
+	if res.URL != "http://app.launchbase.localhost/" {
 		t.Fatalf("url %s", res.URL)
+	}
+	if res.Hostname != "app.launchbase.localhost" {
+		t.Fatalf("hostname %s", res.Hostname)
 	}
 	if res.Image != "launchbase/11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("image %s", res.Image)
@@ -161,8 +164,14 @@ func TestDeployHappyPath(t *testing.T) {
 	if !contains(runArgs, "--cpus") || !contains(runArgs, "--pids-limit") || !contains(runArgs, "--user") {
 		t.Fatalf("run args %v", runArgs)
 	}
-	if !contains(runArgs, "127.0.0.1::3000") {
+	if contains(runArgs, "-p") || contains(runArgs, "127.0.0.1::3000") {
+		t.Fatalf("host publish should not be used: %v", runArgs)
+	}
+	if !contains(runArgs, "--network") || !contains(runArgs, "launchbase-runtime") {
 		t.Fatalf("run args %v", runArgs)
+	}
+	if !contains(runArgs, "--label") {
+		t.Fatalf("missing traefik labels: %v", runArgs)
 	}
 	if contains(runArgs, "--privileged") {
 		t.Fatal("privileged")

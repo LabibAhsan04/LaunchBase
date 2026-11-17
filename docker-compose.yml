@@ -37,17 +37,19 @@ services:
       retries: 10
 
   # dashboard is published on 8088 so it doesn't collide with the api on 8080
+  # docker provider watches user containers on launchbase-runtime only
   traefik:
     image: traefik:v3.5
     command:
       - --configFile=/etc/traefik/traefik.yml
     volumes:
       - ./infrastructure/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       - "80:80"
       - "8088:8080"
     networks:
-      - launchbase
+      - launchbase-runtime
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 5s
@@ -61,3 +63,5 @@ volumes:
 networks:
   launchbase:
     name: launchbase
+  launchbase-runtime:
+    name: launchbase-runtime

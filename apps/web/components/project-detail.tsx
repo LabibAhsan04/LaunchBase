@@ -55,6 +55,19 @@ export function ProjectDetail({ initial }: { initial: Project }) {
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--text)]">{project.name}</h1>
         <p className="mt-2 text-[var(--muted)]">
           {shortRepo(project.repoUrl)} · {project.branch || "default branch"}
+          {project.slug ? (
+            <>
+              {" · "}
+              <a
+                className="text-[var(--accent)] hover:underline"
+                href={`http://${project.slug}.launchbase.localhost/`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {project.slug}.launchbase.localhost
+              </a>
+            </>
+          ) : null}
         </p>
       </div>
 

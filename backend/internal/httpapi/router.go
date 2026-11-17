@@ -48,6 +48,8 @@ func NewMuxWithGitHub(svc *service.Service, gh *github.Client) http.Handler {
 		mux.HandleFunc("POST /api/v1/projects/{projectId}/deployments", requireAuth(h.createDeployment))
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", requireAuth(h.getDeployment))
 		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", requireAuth(h.stopDeployment))
+		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/redeploy", requireAuth(h.redeployDeployment))
+		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/rollback", requireAuth(h.rollbackDeployment))
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs", requireAuth(h.listLogs))
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs/stream", requireAuth(h.streamLogs))
 	}
@@ -159,6 +161,7 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 type projectJSON struct {
 	ID          string           `json:"id"`
 	Name        string           `json:"name"`
+	Slug        string           `json:"slug"`
 	RepoURL     string           `json:"repoUrl"`
 	Branch      string           `json:"branch"`
 	CreatedAt   time.Time        `json:"createdAt"`
@@ -175,6 +178,7 @@ type deploymentJSON struct {
 	Image      string     `json:"image,omitempty"`
 	Container  string     `json:"container,omitempty"`
 	URL        string     `json:"url,omitempty"`
+	Hostname   string     `json:"hostname,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	UpdatedAt  time.Time  `json:"updatedAt"`
@@ -183,7 +187,7 @@ type deploymentJSON struct {
 
 func projectOut(p store.Project, deps []store.Deployment) projectJSON {
 	out := projectJSON{
-		ID: p.ID, Name: p.Name, RepoURL: p.RepoURL, Branch: p.Branch,
+		ID: p.ID, Name: p.Name, Slug: p.Slug, RepoURL: p.RepoURL, Branch: p.Branch,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	if deps != nil {
@@ -198,7 +202,7 @@ func projectOut(p store.Project, deps []store.Deployment) projectJSON {
 func deploymentOut(d store.Deployment) deploymentJSON {
 	return deploymentJSON{
 		ID: d.ID, ProjectID: d.ProjectID, Status: d.Status, RepoURL: d.RepoURL, Branch: d.Branch,
-		Image: d.ImageName, Container: d.ContainerName, URL: d.URL, Error: d.ErrorSummary,
+		Image: d.ImageName, Container: d.ContainerName, URL: d.URL, Hostname: d.Hostname, Error: d.ErrorSummary,
 		CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt, FinishedAt: d.FinishedAt,
 	}
 }

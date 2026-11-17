@@ -13,6 +13,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
@@ -128,10 +129,15 @@ func (s *Service) CreateProject(ctx context.Context, in CreateProjectInput) (sto
 	if err != nil {
 		return store.Project{}, err
 	}
+	slug, err := s.uniqueSlug(ctx, name, id)
+	if err != nil {
+		return store.Project{}, err
+	}
 	project, err := s.Store.CreateProject(ctx, store.Project{
 		ID:             id,
 		OwnerID:        owner,
 		Name:           name,
+		Slug:           slug,
 		RepoURL:        cloneURL,
 		Branch:         branch,
 		InstallationID: installationID,
@@ -289,6 +295,104 @@ func (s *Service) StopDeployment(ctx context.Context, id string) (store.Deployme
 	}
 	_ = s.audit(ctx, owner, "deployment.stopped", dep.ProjectID, dep.ID, dep.ContainerName)
 	return s.Store.GetDeployment(ctx, owner, dep.ID)
+}
+
+// Redeploy queues a new deployment from the project's current repo/branch settings.
+func (s *Service) Redeploy(ctx context.Context, deploymentID string) (store.Deployment, error) {
+	dep, err := s.GetDeployment(ctx, deploymentID)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	branch := dep.Branch
+	out, err := s.CreateDeployment(ctx, dep.ProjectID, branch)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	owner, _ := ownerID(ctx)
+	_ = s.audit(ctx, owner, "deployment.redeployed", dep.ProjectID, out.ID, dep.ID)
+	return out, nil
+}
+
+// Rollback queues a new deployment using the immutable repo/branch of a previous deployment.
+func (s *Service) Rollback(ctx context.Context, deploymentID string) (store.Deployment, error) {
+	dep, err := s.GetDeployment(ctx, deploymentID)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	switch deployments.Status(dep.Status) {
+	case deployments.StatusReady, deployments.StatusStopped, deployments.StatusSuperseded, deployments.StatusFailed:
+	default:
+		return store.Deployment{}, InputError{Message: "rollback requires a finished deployment"}
+	}
+	owner, err := ownerID(ctx)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	project, err := s.Store.GetProject(ctx, owner, dep.ProjectID)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+
+	id, err := newID()
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	outboxID, err := newID()
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	var installationGHID int64
+	if project.InstallationID != "" {
+		inst, err := s.Store.GetInstallation(ctx, project.InstallationID)
+		if err == nil && !inst.Suspended {
+			installationGHID = inst.InstallationID
+		}
+	}
+	payload, err := json.Marshal(queue.Job{
+		Version:        queue.JobVersion,
+		DeploymentID:   id,
+		ProjectID:      project.ID,
+		RepoURL:        dep.RepoURL,
+		Branch:         dep.Branch,
+		Attempt:        1,
+		InstallationID: installationGHID,
+	})
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	out, err := s.Store.CreateDeployment(ctx, store.Deployment{
+		ID:        id,
+		ProjectID: project.ID,
+		Status:    string(deployments.StatusQueued),
+		RepoURL:   dep.RepoURL,
+		Branch:    dep.Branch,
+	}, outboxID, payload)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	_ = s.audit(ctx, owner, "deployment.rollback", project.ID, out.ID, dep.ID)
+	if s.Flush != nil {
+		if err := s.Flush(ctx); err != nil && s.Log != nil {
+			fmt.Fprintf(s.Log, "queue: %v\n", err)
+		}
+	}
+	return out, nil
+}
+
+func (s *Service) uniqueSlug(ctx context.Context, name, id string) (string, error) {
+	base := dockerengine.Slugify(name)
+	slug := base
+	for i := 0; i < 8; i++ {
+		taken, err := s.Store.SlugTaken(ctx, slug, id)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return slug, nil
+		}
+		slug = fmt.Sprintf("%s-%s", base, dockerengine.ShortID(id)[:2+i])
+	}
+	return fmt.Sprintf("%s-%s", base, dockerengine.ShortID(id)), nil
 }
 
 func (s *Service) ListAccessibleRepos(ctx context.Context) ([]store.RepoAccess, error) {

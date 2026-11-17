@@ -32,6 +32,7 @@ type Processor struct {
 	Store       *store.DB
 	Run         func(context.Context, Options) (Result, error)
 	Remove      Remover
+	Images      ImageRemover
 	Log         io.Writer
 	Logs        *logs.Broker
 	Limits      Options
@@ -99,11 +100,18 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 		}
 		cloneToken = tok
 	}
+	slug := "app"
+	if project, perr := p.Store.GetProjectByID(ctx, dep.ProjectID); perr == nil && project.Slug != "" {
+		slug = project.Slug
+	}
 	result, runErr := run(ctx, Options{
 		ID:           dep.ID,
 		RepoURL:      dep.RepoURL,
 		Branch:       dep.Branch,
 		CloneToken:   cloneToken,
+		ProjectSlug:  slug,
+		BaseDomain:   p.Limits.BaseDomain,
+		Network:      p.Limits.Network,
 		CloneTimeout: p.Limits.CloneTimeout,
 		BuildTimeout: p.Limits.BuildTimeout,
 		StartTimeout: p.Limits.StartTimeout,
@@ -138,12 +146,9 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	if runErr != nil {
 		return p.fail(ctx, dep, job, current, runErr)
 	}
-	if err := p.Store.SetResult(ctx, dep.ID, result.Image, result.Container, result.URL); err != nil {
-		return queue.Result{}, err
-	}
 	if current == StatusReady {
-		if err := p.Store.Transition(ctx, dep.ID, string(StatusHealthChecking), string(StatusReady)); err != nil {
-			return queue.Result{}, err
+		if err := p.ActivateReady(ctx, dep, result); err != nil {
+			return p.fail(ctx, dep, job, StatusHealthChecking, err)
 		}
 	}
 	_ = p.audit(ctx, "deployment.ready", dep.ProjectID, dep.ID, result.URL)

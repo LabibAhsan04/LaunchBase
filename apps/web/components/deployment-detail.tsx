@@ -1,34 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
+import { DeploymentActions } from "@/components/deployment-actions";
 import { DeploymentStatusBadge } from "@/components/deployment-status";
 import { LiveLogViewer } from "@/components/live-log-viewer";
-import { ApiError, stopDeployment } from "@/lib/api/client";
 import type { Deployment } from "@/lib/api/types";
 import { formatDuration, formatWhen, shortRepo } from "@/lib/format";
 import { useDeploymentPoll } from "@/hooks/use-deployment-poll";
 import { useDeploymentStream } from "@/hooks/use-deployment-stream";
 
 export function DeploymentDetail({ initial }: { initial: Deployment }) {
-  // SSE is the live path. Status polling stays as a slow fallback.
   const { deployment, error: pollError, setDeployment } = useDeploymentPoll(initial, 10000);
   const { lines, state, error: streamError } = useDeploymentStream(initial.id, setDeployment);
-  const [stopError, setStopError] = useState<string | null>(null);
-  const [stopping, setStopping] = useState(false);
-
-  async function onStop() {
-    setStopError(null);
-    setStopping(true);
-    try {
-      setDeployment(await stopDeployment(deployment.id));
-    } catch (err) {
-      setStopError(err instanceof ApiError ? err.message : "Could not stop the deployment.");
-    } finally {
-      setStopping(false);
-    }
-  }
 
   return (
     <div className="space-y-8">
@@ -52,7 +37,6 @@ export function DeploymentDetail({ initial }: { initial: Deployment }) {
       <dl className="grid gap-5 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-6 sm:grid-cols-2">
         <Item label="Repository" value={shortRepo(deployment.repoUrl)} />
         <Item label="Branch" value={deployment.branch || "—"} />
-        <Item label="Framework" value="—" hint="Not returned by the API yet." />
         <Item label="Created" value={formatWhen(deployment.createdAt)} />
         <Item label="Duration" value={formatDuration(deployment)} />
         <Item
@@ -67,6 +51,7 @@ export function DeploymentDetail({ initial }: { initial: Deployment }) {
             )
           }
         />
+        {deployment.hostname ? <Item label="Hostname" value={deployment.hostname} mono /> : null}
         {deployment.error ? (
           <div className="sm:col-span-2">
             <dt className="text-sm text-[var(--muted)]">Error</dt>
@@ -79,19 +64,7 @@ export function DeploymentDetail({ initial }: { initial: Deployment }) {
 
       <LiveLogViewer lines={lines} state={state} error={streamError} />
 
-      {deployment.status === "READY" ? (
-        <div className="flex flex-wrap items-center gap-3">
-          {deployment.url ? (
-            <a className="btn-primary" href={deployment.url} target="_blank" rel="noreferrer">
-              Open app
-            </a>
-          ) : null}
-          <button type="button" className="btn-secondary" onClick={() => void onStop()} disabled={stopping}>
-            {stopping ? "Stopping…" : "Stop"}
-          </button>
-          {stopError ? <p className="basis-full text-sm text-[var(--bad)]">{stopError}</p> : null}
-        </div>
-      ) : null}
+      <DeploymentActions deployment={deployment} onUpdate={setDeployment} />
     </div>
   );
 }

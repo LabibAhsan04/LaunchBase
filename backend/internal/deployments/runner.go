@@ -24,6 +24,9 @@ type Options struct {
 	ID           string // optional. the api sets this so the row and the container share an id.
 	LocalDir     string // integration test only. the cli does not set this.
 	CloneToken   string // short-lived installation token; never logged or stored in git remote
+	ProjectSlug  string
+	BaseDomain   string
+	Network      string
 	OnStatus     func(Status) error
 	Port         int
 	HealthPath   string
@@ -45,6 +48,7 @@ type Result struct {
 	Image     string
 	Container string
 	URL       string
+	Hostname  string
 }
 
 type Probe interface {
@@ -224,16 +228,35 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		opt.logf("image user %s", user)
 	}
 
-	opt.logf("starting %s", container)
+	slug := opt.ProjectSlug
+	if slug == "" {
+		slug = "app"
+	}
+	domain := opt.BaseDomain
+	if domain == "" {
+		domain = dockerengine.BaseDomain()
+	}
+	network := opt.Network
+	if network == "" {
+		network = dockerengine.RuntimeNetwork()
+	}
+	projectHost := dockerengine.ProjectHost(slug, domain)
+	deploymentHost := dockerengine.DeploymentHost(slug, id, domain)
+	labels := dockerengine.TraefikLabels(projectHost, deploymentHost, strconv.Itoa(port))
+
+	opt.logf("starting %s on %s", container, network)
+	opt.logf("route %s", projectHost)
 	err = engine.Start(ctx, dockerengine.RunSpec{
-		Name:   container,
-		Image:  image,
-		Port:   strconv.Itoa(port),
-		Memory: opt.Memory,
-		CPUs:   opt.CPUs,
-		PIDs:   opt.PIDs,
-		User:   user,
-		Tmpfs:  detected.Tmpfs,
+		Name:    container,
+		Image:   image,
+		Port:    strconv.Itoa(port),
+		Memory:  opt.Memory,
+		CPUs:    opt.CPUs,
+		PIDs:    opt.PIDs,
+		User:    user,
+		Tmpfs:   detected.Tmpfs,
+		Network: network,
+		Labels:  labels,
 	})
 	if err != nil {
 		return Result{}, err
@@ -244,11 +267,11 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		return Result{}, err
 	}
 
-	host, err := engine.HostPort(ctx, container, port)
-	if err != nil {
-		return Result{}, err
+	// Health-check through Traefik using the deployment hostname, not a host-published port.
+	rawURL := dockerengine.PublicURL(deploymentHost)
+	if opt.HealthPath != "/" {
+		rawURL = strings.TrimRight(dockerengine.PublicURL(deploymentHost), "/") + opt.HealthPath
 	}
-	rawURL := "http://" + host + opt.HealthPath
 	opt.logf("health %s", rawURL)
 
 	healthCtx, cancel := context.WithTimeout(ctx, opt.StartTimeout)
@@ -261,12 +284,13 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 	if err = opt.advance(dep, StatusReady); err != nil {
 		return Result{}, err
 	}
+	stableURL := dockerengine.PublicURL(projectHost)
 	opt.logf("id=%s", id)
 	opt.logf("image=%s", image)
 	opt.logf("container=%s", container)
-	opt.logf("url=%s", rawURL)
+	opt.logf("url=%s", stableURL)
 
-	return Result{ID: id, Image: image, Container: container, URL: rawURL}, nil
+	return Result{ID: id, Image: image, Container: container, URL: stableURL, Hostname: projectHost}, nil
 }
 
 func (o *Options) fill() {
@@ -302,6 +326,15 @@ func (o *Options) fill() {
 	}
 	if o.Runner == nil {
 		o.Runner = dockerengine.Local{}
+	}
+	if o.BaseDomain == "" {
+		o.BaseDomain = dockerengine.BaseDomain()
+	}
+	if o.Network == "" {
+		o.Network = dockerengine.RuntimeNetwork()
+	}
+	if o.ProjectSlug == "" {
+		o.ProjectSlug = "app"
 	}
 }
 

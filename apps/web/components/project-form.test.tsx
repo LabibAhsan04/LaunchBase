@@ -45,6 +45,7 @@ describe("ProjectForm happy path", () => {
     vi.mocked(createProject).mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
       name: "Demo",
+      slug: "demo",
       repoUrl: "https://github.com/acme/web.git",
       branch: "main",
       createdAt: "2026-11-06T00:00:00Z",
@@ -94,6 +95,7 @@ describe("ProjectForm happy path", () => {
     vi.mocked(createProject).mockResolvedValue({
       id: "11111111-1111-4111-8111-111111111111",
       name: "Demo",
+      slug: "demo",
       repoUrl: "https://github.com/acme/web.git",
       branch: "dev",
       createdAt: "2026-11-06T00:00:00Z",

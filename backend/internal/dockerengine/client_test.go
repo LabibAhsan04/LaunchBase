@@ -7,32 +7,34 @@ import (
 
 func TestContainerRunArgs(t *testing.T) {
 	args := containerRunArgs(RunSpec{
-		Name:   "launchbase-abc",
-		Image:  "launchbase/abc",
-		Port:   "3000",
-		Memory: "512m",
-		CPUs:   "1.0",
-		PIDs:   "128",
-		User:   "node",
+		Name:    "launchbase-abc",
+		Image:   "launchbase/abc",
+		Port:    "3000",
+		Memory:  "512m",
+		CPUs:    "1.0",
+		PIDs:    "128",
+		User:    "node",
+		Network: "launchbase-runtime",
+		Labels: map[string]string{
+			"traefik.enable":                 "true",
+			"traefik.http.routers.demo.rule": "Host(`demo.launchbase.localhost`)",
+		},
 	})
-	want := []string{
-		"run", "-d",
-		"--name", "launchbase-abc",
-		"--memory", "512m",
-		"--cpus", "1.0",
-		"--pids-limit", "128",
-		"--read-only",
-		"--tmpfs", "/tmp",
-		"-p", "127.0.0.1::3000",
-		"--user", "node",
+	joined := strings.Join(args, "\n")
+	for _, want := range []string{
+		"--network\nlaunchbase-runtime",
+		"--label\ntraefik.enable=true",
+		"--label\ntraefik.http.routers.demo.rule=Host(`demo.launchbase.localhost`)",
+		"--user\nnode",
 		"launchbase/abc",
-	}
-	if strings.Join(args, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("args:\n%s", strings.Join(args, "\n"))
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in:\n%s", want, joined)
+		}
 	}
 	for _, arg := range args {
-		if arg == "--privileged" || strings.Contains(arg, "docker.sock") {
-			t.Fatalf("unsafe arg %s", arg)
+		if arg == "--privileged" || strings.Contains(arg, "docker.sock") || arg == "-p" {
+			t.Fatalf("unsafe or host-publish arg %s", arg)
 		}
 	}
 }

@@ -36,7 +36,7 @@ func TestQueuedDeploymentBecomesReady(t *testing.T) {
 	defer cancel()
 
 	dep := waitStatus(t, db, depID, "READY")
-	if dep.URL != "http://127.0.0.1:9/" || dep.ContainerName != deployments.ContainerName(depID) {
+	if dep.URL != "http://demo.launchbase.localhost/" || dep.ContainerName != deployments.ContainerName(depID) {
 		t.Fatalf("%+v", dep)
 	}
 	if calls.count() != 1 {
@@ -300,7 +300,8 @@ func walkReady(opt deployments.Options) (deployments.Result, error) {
 	return deployments.Result{
 		Image:     deployments.ImageName(opt.ID),
 		Container: deployments.ContainerName(opt.ID),
-		URL:       "http://127.0.0.1:9/",
+		URL:       "http://demo.launchbase.localhost/",
+		Hostname:  "demo.launchbase.localhost",
 	}, nil
 }
 
