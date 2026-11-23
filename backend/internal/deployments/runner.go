@@ -58,11 +58,23 @@ type Probe interface {
 type httpProbe struct{}
 
 func (httpProbe) Probe(ctx context.Context, rawURL string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	dialURL, hostHeader, err := dockerengine.LocalhostDial(rawURL)
 	if err != nil {
 		return 0, err
 	}
-	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dialURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	if hostHeader != "" {
+		req.Host = hostHeader
+	}
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return 0, err

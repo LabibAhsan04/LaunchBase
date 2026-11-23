@@ -2,6 +2,7 @@ package dockerengine
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -67,6 +68,34 @@ func PublicURL(host string) string {
 		return ""
 	}
 	return "http://" + host + "/"
+}
+
+// LocalhostDial rewrites *.localhost (and localhost) URLs to dial 127.0.0.1 while
+// preserving the original Host header. On Linux, .localhost often resolves to ::1
+// while Docker publishes host ports on IPv4 only, which breaks Traefik health checks in CI.
+func LocalhostDial(rawURL string) (dialURL, hostHeader string, err error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", "", err
+	}
+	hostHeader = u.Hostname()
+	if hostHeader == "" {
+		return rawURL, "", nil
+	}
+	if hostHeader != "localhost" && !strings.HasSuffix(hostHeader, ".localhost") {
+		return rawURL, hostHeader, nil
+	}
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	rewritten := *u
+	rewritten.Host = "127.0.0.1:" + port
+	return rewritten.String(), hostHeader, nil
 }
 
 func ShortID(id string) string {

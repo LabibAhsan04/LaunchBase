@@ -31,6 +31,9 @@ jobs:
       - name: deploy example through Docker and Traefik
         working-directory: backend
         run: go test -tags=integration -count=1 -timeout 15m ./internal/deployments -run TestExampleNodeDemo
+      - name: dump traefik on failure
+        if: failure()
+        run: docker compose logs traefik
       - name: stop compose
         if: always()
         run: docker compose down
