@@ -32,6 +32,10 @@ func (g *Gate) Draining() bool {
 }
 
 func Handler(g *Gate, ready func(context.Context) error) http.Handler {
+	return HandlerWithMetrics(g, ready, nil)
+}
+
+func HandlerWithMetrics(g *Gate, ready func(context.Context) error, metrics http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		status := "ok"
@@ -53,6 +57,9 @@ func Handler(g *Gate, ready func(context.Context) error) http.Handler {
 		}
 		write(w, http.StatusOK, "ok")
 	})
+	if metrics != nil {
+		mux.Handle("GET /metrics", metrics)
+	}
 	return mux
 }
 

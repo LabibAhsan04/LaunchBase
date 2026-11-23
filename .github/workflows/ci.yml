@@ -39,9 +39,33 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: format
+        working-directory: backend
+        run: test -z "$(gofmt -l .)"
+      - name: vet
+        working-directory: backend
+        run: go vet ./...
       - name: test
         working-directory: backend
-        run: go test ./...
+        run: go test -count=1 -coverprofile=coverage.out ./...
+      - name: coverage summary
+        working-directory: backend
+        run: go tool cover -func=coverage.out | tail -n 1
+      - name: migrate check
+        working-directory: backend
+        run: |
+          go run ./cmd/api &
+          pid=$!
+          trap 'kill $pid' EXIT
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "api never became ready" >&2
+          exit 1
 
   web:
     runs-on: ubuntu-latest
@@ -67,3 +91,15 @@ jobs:
       - name: test
         working-directory: apps/web
         run: pnpm test
+      - name: build
+        working-directory: apps/web
+        run: pnpm build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build api image
+        run: docker build -f backend/Dockerfile --target api -t launchbase-api:ci ./backend
+      - name: build worker image
+        run: docker build -f backend/Dockerfile --target worker -t launchbase-worker:ci ./backend

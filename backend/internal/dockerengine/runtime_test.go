@@ -1,6 +1,9 @@
 package dockerengine
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
@@ -27,6 +30,23 @@ func TestHosts(t *testing.T) {
 	}
 	if got := PublicURL("demo.launchbase.localhost"); got != "http://demo.launchbase.localhost/" {
 		t.Fatalf("%s", got)
+	}
+}
+
+func TestLocalhostDial(t *testing.T) {
+	dial, host, err := LocalhostDial("http://app-99a15a16.launchbase.localhost/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host != "app-99a15a16.launchbase.localhost" {
+		t.Fatalf("host %q", host)
+	}
+	if dial != "http://127.0.0.1:80/health" {
+		t.Fatalf("dial %q", dial)
+	}
+	dial, host, err = LocalhostDial("https://example.com/x")
+	if err != nil || host != "example.com" || !strings.Contains(dial, "example.com") {
+		t.Fatalf("%s %s %v", dial, host, err)
 	}
 }
 

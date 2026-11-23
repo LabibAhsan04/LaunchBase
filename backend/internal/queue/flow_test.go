@@ -265,6 +265,19 @@ func TestWorkerHealth(t *testing.T) {
 	}
 }
 
+func TestWorkerMetricsEndpoint(t *testing.T) {
+	gate := &queue.Gate{}
+	h := queue.HandlerWithMetrics(gate, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok_metric\n"))
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "ok_metric") {
+		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+}
+
 func processor(db *store.DB, run func(context.Context, deployments.Options) (deployments.Result, error), rem deployments.Remover) *deployments.Processor {
 	return &deployments.Processor{
 		Store:       db,

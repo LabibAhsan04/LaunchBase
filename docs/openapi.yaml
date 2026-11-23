@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     AUTH_MODE=dev (default) acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`) when no session cookie is present.
@@ -16,12 +16,13 @@ info:
     Redeploy and rollback queue new immutable deployments; a successful cutover marks
     the previous READY deployment SUPERSEDED.
     Concurrency and per-IP rate limits return 429. See docs/security.md.
+    JSON logs, `/metrics`, `/ready`, and traceparent hooks: docs/observability.md.
 servers:
   - url: http://localhost:8080
 paths:
   /health:
     get:
-      summary: Process health
+      summary: Process liveness
       responses:
         "200":
           description: The process is up
@@ -29,6 +30,33 @@ paths:
             application/json:
               example:
                 status: ok
+  /ready:
+    get:
+      summary: Process readiness
+      description: Checks Postgres and Redis. Does not include dependency error details.
+      responses:
+        "200":
+          description: Dependencies reachable
+          content:
+            application/json:
+              example:
+                status: ok
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              example:
+                status: not ready
+  /metrics:
+    get:
+      summary: Prometheus text metrics
+      responses:
+        "200":
+          description: Prometheus exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
   /api/v1/auth/login:
     get:
       summary: Start GitHub OAuth

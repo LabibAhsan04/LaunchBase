@@ -16,6 +16,21 @@ import (
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
 )
 
+func getRouted(ctx context.Context, rawURL string) (*http.Response, error) {
+	dialURL, hostHeader, err := dockerengine.LocalhostDial(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dialURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if hostHeader != "" {
+		req.Host = hostHeader
+	}
+	return http.DefaultClient.Do(req)
+}
+
 func TestExampleNodeDemo(t *testing.T) {
 	deployExample(t, "examples/node-demo", "ok")
 }
@@ -70,7 +85,7 @@ func deployExample(t *testing.T, rel, want string) {
 		_ = exec.Command("docker", "image", "rm", res.Image).Run()
 	})
 
-	resp, err := http.Get(res.URL)
+	resp, err := getRouted(ctx, res.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
