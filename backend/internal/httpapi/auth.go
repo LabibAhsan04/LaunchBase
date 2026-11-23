@@ -78,15 +78,23 @@ func (h handlers) authCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.SetSessionCookie(w, raw, expires)
+	_ = h.svc.Audit(r.Context(), user.ID, "auth.login", "", "", user.Login)
 	http.Redirect(w, r, webOrigin()+"/", http.StatusFound)
 }
 
 func (h handlers) authLogout(w http.ResponseWriter, r *http.Request) {
 	raw := auth.ReadCookie(r, auth.CookieName)
+	actor := ""
+	if u, ok := auth.UserFrom(r.Context()); ok {
+		actor = u.ID
+	}
 	if raw != "" && h.svc != nil && h.svc.Store != nil {
 		_ = h.svc.Store.DeleteSession(r.Context(), auth.HashToken(raw))
 	}
 	auth.ClearSessionCookie(w)
+	if h.svc != nil {
+		_ = h.svc.Audit(r.Context(), actor, "auth.logout", "", "", "")
+	}
 	if r.Header.Get("Accept") == "application/json" || r.URL.Query().Get("json") == "1" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return

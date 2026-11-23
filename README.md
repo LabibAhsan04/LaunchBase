@@ -99,6 +99,10 @@ make format
 
 `make test` runs `go test ./...`, `pnpm typecheck`, and `pnpm test` in `apps/web`. The API and queue tests need Postgres and Redis (`make dev-infra`). They do not need a Docker build. The example deploy scripts do. `make lint` is `go vet` plus eslint.
 
+## Security
+
+Trust model, container hardening, concurrency limits, and accepted single-host risks are in `docs/security.md`. Vulnerability reports: `SECURITY.md`. Use `AUTH_MODE=github` outside local development so deploys require a signed-in user and an installed repository.
+
 ## API
 
 Start Postgres, then the API. Migrations run as the process starts.

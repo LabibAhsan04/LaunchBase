@@ -349,6 +349,26 @@ func (db *DB) SlugTaken(ctx context.Context, slug string, exceptID string) (bool
 	return err == nil, err
 }
 
+func (db *DB) CountDeploymentsByStatus(ctx context.Context, ownerID string, statuses []string) (int, error) {
+	if len(statuses) == 0 {
+		return 0, nil
+	}
+	var row *sql.Row
+	if ownerID != "" {
+		row = db.sql.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM deployments d
+			JOIN projects p ON p.id = d.project_id
+			WHERE p.owner_id = $1 AND d.status = ANY($2)`, ownerID, statuses)
+	} else {
+		row = db.sql.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM deployments WHERE status = ANY($1)`, statuses)
+	}
+	var n int
+	err := row.Scan(&n)
+	return n, err
+}
+
 func (db *DB) SetError(ctx context.Context, id, summary string) error {
 	_, err := db.sql.ExecContext(ctx, `
 		UPDATE deployments
@@ -363,7 +383,7 @@ func (db *DB) AddAudit(ctx context.Context, a Audit) error {
 	}
 	_, err := db.sql.ExecContext(ctx, `
 		INSERT INTO audit_events (id, actor_id, action, project_id, deployment_id, detail, created_at)
-		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, $6, $7)`,
+		VALUES ($1, NULLIF($2, '')::uuid, $3, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, $6, $7)`,
 		a.ID, a.ActorID, a.Action, a.ProjectID, a.DeploymentID, a.Detail, a.CreatedAt)
 	return err
 }
