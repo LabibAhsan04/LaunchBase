@@ -57,6 +57,7 @@ func buildMux(svc *service.Service, gh *github.Client, opt Options) http.Handler
 		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/rollback", h.requireAuth(h.rollbackDeployment))
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs", h.requireAuth(h.listLogs))
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs/stream", h.requireAuth(h.streamLogs))
+		mux.HandleFunc("GET /api/v1/ops/status", h.opsStatus)
 	}
 
 	devUser := auth.User{

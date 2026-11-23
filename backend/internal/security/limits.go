@@ -10,6 +10,7 @@ const (
 	DefaultMaxBuildsPerUser = 2
 	DefaultMaxBuildsGlobal  = 10
 	DefaultMaxReadyPerUser  = 5
+	DefaultMaxReadyGlobal   = 8
 	DefaultAPIRatePerMin    = 120
 	DefaultAuthRatePerMin   = 20
 )
@@ -18,6 +19,7 @@ type Limits struct {
 	MaxBuildsPerUser int
 	MaxBuildsGlobal  int
 	MaxReadyPerUser  int
+	MaxReadyGlobal   int
 	APIRatePerMin    int
 	AuthRatePerMin   int
 }
@@ -27,6 +29,7 @@ func LimitsFromEnv() Limits {
 		MaxBuildsPerUser: intEnv("MAX_BUILDS_PER_USER", DefaultMaxBuildsPerUser),
 		MaxBuildsGlobal:  intEnv("MAX_BUILDS_GLOBAL", DefaultMaxBuildsGlobal),
 		MaxReadyPerUser:  intEnv("MAX_READY_PER_USER", DefaultMaxReadyPerUser),
+		MaxReadyGlobal:   intEnv("MAX_READY_GLOBAL", DefaultMaxReadyGlobal),
 		APIRatePerMin:    intEnv("API_RATE_PER_MIN", DefaultAPIRatePerMin),
 		AuthRatePerMin:   intEnv("AUTH_RATE_PER_MIN", DefaultAuthRatePerMin),
 	}

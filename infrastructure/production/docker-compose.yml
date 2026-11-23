@@ -1,0 +1,168 @@
+# LaunchBase production stack for a single Linux VM.
+# Usage: see docs/deployment.md
+#
+# Networks:
+#   launchbase         — postgres, redis, api, worker, web (no public publish)
+#   launchbase-runtime — traefik + user app containers (worker joins both)
+name: launchbase-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-launchbase}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-launchbase}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [launchbase]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-launchbase} -d ${POSTGRES_DB:-launchbase}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [launchbase]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+      target: api
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      API_ADDR: ":8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-launchbase}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-launchbase}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      AUTH_MODE: github
+      APP_ENV: production
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
+    volumes:
+      - ${GITHUB_APP_PRIVATE_KEY_HOST_PATH:?set GITHUB_APP_PRIVATE_KEY_HOST_PATH}:/run/secrets/github-app.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [launchbase, launchbase-runtime]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=launchbase-runtime
+      - traefik.http.routers.lb-api.rule=Host(`${CONTROL_HOST}`) && (PathPrefix(`/api`) || Path(`/health`) || Path(`/ready`) || Path(`/metrics`))
+      - traefik.http.routers.lb-api.entrypoints=websecure
+      - traefik.http.routers.lb-api.tls=true
+      - traefik.http.routers.lb-api.tls.certresolver=le
+      - traefik.http.routers.lb-api.service=lb-api
+      - traefik.http.services.lb-api.loadbalancer.server.port=8080
+      - traefik.http.middlewares.lb-https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.lb-https-redirect.redirectscheme.permanent=true
+      - traefik.http.routers.lb-api-http.rule=Host(`${CONTROL_HOST}`) && (PathPrefix(`/api`) || Path(`/health`) || Path(`/ready`) || Path(`/metrics`))
+      - traefik.http.routers.lb-api-http.entrypoints=web
+      - traefik.http.routers.lb-api-http.middlewares=lb-https-redirect
+      - traefik.http.routers.lb-api-http.service=lb-api
+
+  worker:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+      target: worker-runtime
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-launchbase}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-launchbase}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      WORKER_ADDR: ":8081"
+      RUNTIME_NETWORK: launchbase-runtime
+      BASE_DOMAIN: ${BASE_DOMAIN:?set BASE_DOMAIN}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GITHUB_APP_PRIVATE_KEY_HOST_PATH:?set GITHUB_APP_PRIVATE_KEY_HOST_PATH}:/run/secrets/github-app.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [launchbase, launchbase-runtime]
+
+  web:
+    build:
+      context: ../../apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://${CONTROL_HOST}}
+        API_URL: http://api:8080
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://${CONTROL_HOST}}
+      API_URL: http://api:8080
+    depends_on:
+      - api
+    networks: [launchbase, launchbase-runtime]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=launchbase-runtime
+      - traefik.http.routers.lb-web.rule=Host(`${CONTROL_HOST}`)
+      - traefik.http.routers.lb-web.entrypoints=websecure
+      - traefik.http.routers.lb-web.tls=true
+      - traefik.http.routers.lb-web.tls.certresolver=le
+      - traefik.http.routers.lb-web.priority=1
+      - traefik.http.routers.lb-web.service=lb-web
+      - traefik.http.services.lb-web.loadbalancer.server.port=3000
+      - traefik.http.routers.lb-web-http.rule=Host(`${CONTROL_HOST}`)
+      - traefik.http.routers.lb-web-http.entrypoints=web
+      - traefik.http.routers.lb-web-http.middlewares=lb-https-redirect
+      - traefik.http.routers.lb-web-http.priority=1
+      - traefik.http.routers.lb-web-http.service=lb-web
+
+  traefik:
+    image: traefik:v3.6
+    restart: unless-stopped
+    environment:
+      DOCKER_API_VERSION: "1.44"
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL:-ops@example.com}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../traefik/traefik.production.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks: [launchbase-runtime]
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
+  letsencrypt:
+
+networks:
+  launchbase:
+    name: launchbase
+  launchbase-runtime:
+    name: launchbase-runtime

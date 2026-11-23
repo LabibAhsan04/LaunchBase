@@ -1,0 +1,25 @@
+# Base static config. ACME email/storage and entrypoint details are set via
+# docker compose command flags so secrets stay in the environment file.
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+  traefik:
+    address: ":8080"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: launchbase-runtime
+    watch: true
+
+api:
+  dashboard: false
+  insecure: false
+
+ping: {}
+
+log:
+  level: INFO

@@ -20,3 +20,10 @@ COPY --from=build /out/worker /worker
 USER nonroot:nonroot
 EXPOSE 8081
 ENTRYPOINT ["/worker"]
+
+# Production worker: needs docker CLI + git to clone and build on the host engine.
+FROM docker:27-cli AS worker-runtime
+RUN apk add --no-cache git ca-certificates
+COPY --from=build /out/worker /worker
+EXPOSE 8081
+ENTRYPOINT ["/worker"]

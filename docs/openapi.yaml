@@ -1,12 +1,13 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.10.0
+  version: 0.11.0
   description: |
     AUTH_MODE=dev (default) acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`) when no session cookie is present.
     AUTH_MODE=github requires a signed-in session for project and deployment APIs
     and repositories linked through a GitHub App installation.
+    AUTH_ALLOWLIST (comma-separated GitHub logins) rejects other OAuth users with 403.
 
     Sessions use an HTTP-only cookie (`lb_session`). CORS allows credentials from WEB_ORIGIN.
     Creating a deployment stores a QUEUED row and returns immediately.
@@ -17,6 +18,7 @@ info:
     the previous READY deployment SUPERSEDED.
     Concurrency and per-IP rate limits return 429. See docs/security.md.
     JSON logs, `/metrics`, `/ready`, and traceparent hooks: docs/observability.md.
+    Portfolio VM deploy: docs/deployment.md. Operator status: GET /api/v1/ops/status.
 servers:
   - url: http://localhost:8080
 paths:
@@ -57,6 +59,24 @@ paths:
             text/plain:
               schema:
                 type: string
+  /api/v1/ops/status:
+    get:
+      summary: Operator status (token required)
+      description: Returns 404 when OPS_TOKEN is unset. Authorization Bearer OPS_TOKEN otherwise.
+      parameters:
+        - in: header
+          name: Authorization
+          required: true
+          schema:
+            type: string
+            example: Bearer replace-me
+      responses:
+        "200":
+          description: Queue and deployment counters
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/auth/login:
     get:
       summary: Start GitHub OAuth

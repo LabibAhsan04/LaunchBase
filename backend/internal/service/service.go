@@ -424,6 +424,15 @@ func (s *Service) checkConcurrency(ctx context.Context, owner string) error {
 	if ready >= limits.MaxReadyPerUser {
 		return LimitError{Message: "too many ready deployments; stop one before starting another"}
 	}
+	if limits.MaxReadyGlobal > 0 {
+		globalReady, err := s.Store.CountDeploymentsByStatus(ctx, "", security.ReadyStatuses)
+		if err != nil {
+			return err
+		}
+		if globalReady >= limits.MaxReadyGlobal {
+			return LimitError{Message: "platform ready capacity is full; stop an old deployment first"}
+		}
+	}
 	return nil
 }
 

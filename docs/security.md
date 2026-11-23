@@ -17,7 +17,7 @@ LaunchBase is a single-host portfolio platform. It can demonstrate layered defen
 
 1. The operator controls the host, Docker daemon, `.env`, and GitHub App credentials.
 2. `AUTH_MODE=dev` is for local development only. It may create projects from public URLs without an installation.
-3. `AUTH_MODE=github` is required for any shared or demo environment: users must sign in, and deployments must use repositories granted through their GitHub App installation.
+3. `AUTH_MODE=github` is required for any shared or demo environment: users must sign in, and deployments must use repositories granted through their GitHub App installation. Set `AUTH_ALLOWLIST` to invited GitHub logins so the portfolio demo is not open registration.
 4. Repositories selected for deploy are treated as untrusted build input, even when the owner is authenticated.
 5. Traefik may mount the Docker socket. User application containers must never receive it.
 

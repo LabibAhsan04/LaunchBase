@@ -1,20 +1,56 @@
 # LaunchBase
 
-LaunchBase takes a GitHub repository, builds it in Docker, and gives you a URL. The API stores projects and deployments in Postgres and queues the build in Redis. A separate worker process does the clone and the Docker build.
+LaunchBase is a portfolio-grade mini deployment platform: connect a GitHub repo, watch live build logs, and get a Traefik-routed URL to a hardened Docker container.
+
+**Problem.** Shipping a side project still means gluing together git, Docker, a reverse proxy, and logs. LaunchBase demonstrates that path as one coherent system you can run locally or on a single demo VM.
+
+**Not a public PaaS.** Demo access is GitHub OAuth + an allowlist. Anonymous arbitrary-code hosting is intentionally out of scope (`docs/audit.md`).
+
+## Architecture
+
+```text
+Browser → Next.js dashboard → Go API → Postgres
+                              ↓ outbox
+                            Redis stream → Worker → Docker build/run
+                                              ↓
+                                         Traefik (*.BASE_DOMAIN)
+```
+
+Invariants: the API never talks to Docker; only the worker does. User containers never receive the Docker socket. State transitions go through one validated machine. See `docs/adr/`.
+
+## Feature demo
+
+Two-minute script: `docs/demo.md`. Screenshots belong in `docs/screenshots/`.
+
+## Engineering challenges
+
+- Durable queue via Postgres outbox + Redis (survives Redis blips)
+- Idempotent worker locks and stable container names on retry
+- Live SSE logs with secret redaction
+- Traefik routing on a network isolated from Postgres/Redis
+- CI that builds images and deploys `examples/node-demo` through Traefik
+
+## Security model
+
+Trust assumptions, container hardening, rate limits, and accepted single-host risks: `docs/security.md`. Vulnerability reports: `SECURITY.md`.
+
+## Public demo VM
+
+Vendor-neutral Compose stack, HTTPS, firewall, backups, cleanup, and ops status: **`docs/deployment.md`**.
 
 ## What is on disk
 
-| Path | What it is right now |
+| Path | What it is |
 | --- | --- |
-| `apps/web` | Next.js dashboard for projects and deployments. |
-| `backend/cmd/api` | Go HTTP server. Health check, projects, and deployments. |
-| `backend/cmd/worker` | Queue worker. Also a one-shot deploy when you pass `--repo`. |
-| `docker-compose.yml` | Postgres, Redis, Traefik on a network named `launchbase`. |
-| `docs/openapi.yaml` | HTTP contract. |
-| `docs/testing.md` | Unit / integration / e2e commands and CI matrix. |
-| `docs/observability.md` | JSON logs, metrics, readiness, trace context. |
-| `docs/adr/` | Architecture decision records. |
-| `docs/release-checklist.md` | Pre-release and smoke checks. |
+| `apps/web` | Next.js dashboard |
+| `backend/cmd/api` | Go HTTP API |
+| `backend/cmd/worker` | Deployment worker |
+| `docker-compose.yml` | Local Postgres, Redis, Traefik |
+| `infrastructure/production/` | Single-VM production Compose + env example |
+| `docs/openapi.yaml` | HTTP contract |
+| `docs/testing.md` / `docs/observability.md` | CI and telemetry |
+| `docs/deployment.md` / `docs/demo.md` | Portfolio launch |
+| `docs/adr/` | Architecture decisions |
 
 The API process opens Postgres, runs migrations, and publishes jobs to Redis. It does not build or start a user container. `POST /api/v1/projects/{id}/deployments` commits a `QUEUED` deployment and an outbox row in one transaction, then returns. If Redis is down, the row stays in `deployment_outbox` until the API or the worker can publish it.
 
