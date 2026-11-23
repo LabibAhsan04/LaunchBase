@@ -39,7 +39,11 @@ services:
   # dashboard is published on 8088 so it doesn't collide with the api on 8080
   # docker provider watches user containers on launchbase-runtime only
   traefik:
-    image: traefik:v3.5
+    # v3.6+ negotiates a modern Docker API. Older Traefik images speak 1.24 and
+    # fail on current GitHub Actions / Docker Engine hosts (min API 1.40+).
+    image: traefik:v3.6
+    environment:
+      DOCKER_API_VERSION: "1.44"
     command:
       - --configFile=/etc/traefik/traefik.yml
     volumes:
