@@ -27,6 +27,7 @@ Two-minute script: `docs/demo.md`. Screenshots belong in `docs/screenshots/`.
 - Durable queue via Postgres outbox + Redis (survives Redis blips)
 - Idempotent worker locks and stable container names on retry
 - Live SSE logs with secret redaction
+- Encrypted project env vars injected into runtime containers
 - Traefik routing on a network isolated from Postgres/Redis
 - CI that builds images and deploys `examples/node-demo` through Traefik
 

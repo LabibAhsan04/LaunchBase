@@ -15,6 +15,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/envcrypt"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/observability"
@@ -118,6 +119,12 @@ func runQueue() {
 		os.Exit(1)
 	}
 
+	envBox, err := envcrypt.FromEnv()
+	if err != nil {
+		logger.Error("env_encryption_failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
+	}
+
 	name := workerName()
 	engine := dockerengine.Client{}
 	logWriter := observability.Writer{Log: logger}
@@ -128,6 +135,7 @@ func runQueue() {
 		Images: engine,
 		Log:    logWriter,
 		Logs:   broker,
+		EnvBox: envBox,
 		Owner:  name,
 		Tokens: github.InstallationTokens{Client: gh},
 		Limits: deployments.Options{

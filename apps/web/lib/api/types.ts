@@ -90,6 +90,19 @@ export type CreateDeploymentInput = {
   branch?: string;
 };
 
+export type ProjectEnvVar = {
+  key: string;
+  environment: string;
+  hint: string;
+  updatedAt: string;
+};
+
+export type UpsertEnvInput = {
+  key: string;
+  value: string;
+  environment?: string;
+};
+
 export type DeploymentLog = {
   seq: number;
   deploymentId: string;

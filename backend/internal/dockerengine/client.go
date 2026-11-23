@@ -84,6 +84,8 @@ type RunSpec struct {
 	Tmpfs   []string
 	Network string
 	Labels  map[string]string
+	// Env is user-app KEY=value pairs. LaunchBase secrets are rejected by AssertSafeRunArgs.
+	Env map[string]string
 }
 
 func (c Client) Start(ctx context.Context, spec RunSpec) error {
@@ -136,7 +138,17 @@ func containerRunArgs(s RunSpec) []string {
 	if s.User != "" {
 		args = append(args, "--user", s.User)
 	}
-	// Never pass -e / --env for LaunchBase secrets. User app env is omitted in the MVP.
+	envKeys := make([]string, 0, len(s.Env))
+	for k := range s.Env {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		if isLaunchBaseEnv(k) {
+			continue
+		}
+		args = append(args, "-e", k+"="+s.Env[k])
+	}
 	args = append(args, s.Image)
 	return args
 }

@@ -50,6 +50,9 @@ func buildMux(svc *service.Service, gh *github.Client, opt Options) http.Handler
 		mux.HandleFunc("POST /api/v1/projects", h.requireAuth(h.createProject))
 		mux.HandleFunc("GET /api/v1/projects", h.requireAuth(h.listProjects))
 		mux.HandleFunc("GET /api/v1/projects/{projectId}", h.requireAuth(h.getProject))
+		mux.HandleFunc("GET /api/v1/projects/{projectId}/env", h.requireAuth(h.listEnvVars))
+		mux.HandleFunc("PUT /api/v1/projects/{projectId}/env", h.requireAuth(h.upsertEnvVar))
+		mux.HandleFunc("DELETE /api/v1/projects/{projectId}/env/{key}", h.requireAuth(h.deleteEnvVar))
 		mux.HandleFunc("POST /api/v1/projects/{projectId}/deployments", h.requireAuth(h.createDeployment))
 		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", h.requireAuth(h.getDeployment))
 		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", h.requireAuth(h.stopDeployment))
@@ -84,7 +87,7 @@ func cors(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, Last-Event-ID, traceparent")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, traceparent")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

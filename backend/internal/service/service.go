@@ -14,6 +14,7 @@ import (
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/deployments"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/envcrypt"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
@@ -47,6 +48,7 @@ type Service struct {
 	Logs    *logs.Broker
 	GitHub  *github.Client
 	Limits  security.Limits
+	EnvBox  *envcrypt.Box
 	// Flush publishes one outbox row. The deployment is already committed if this fails.
 	Flush func(context.Context) error
 }

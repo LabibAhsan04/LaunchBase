@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { DeployForm } from "@/components/deploy-form";
 import { DeploymentStatusBadge } from "@/components/deployment-status";
+import { ProjectEnv } from "@/components/project-env";
 import { StateBlock } from "@/components/state-block";
 import { ApiError, getProject } from "@/lib/api/client";
 import type { Project } from "@/lib/api/types";
@@ -80,6 +81,8 @@ export function ProjectDetail({ initial }: { initial: Project }) {
         </p>
         <DeployForm projectId={project.id} defaultBranch={project.branch || "main"} />
       </section>
+
+      <ProjectEnv projectId={project.id} />
 
       <section className="space-y-4">
         <h2 className="text-lg font-medium text-[var(--text)]">Deployments</h2>

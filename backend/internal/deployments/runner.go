@@ -27,6 +27,7 @@ type Options struct {
 	ProjectSlug  string
 	BaseDomain   string
 	Network      string
+	Env          map[string]string // decrypted project env; never logged
 	OnStatus     func(Status) error
 	Port         int
 	HealthPath   string
@@ -269,6 +270,7 @@ func Run(ctx context.Context, opt Options) (res Result, err error) {
 		Tmpfs:   detected.Tmpfs,
 		Network: network,
 		Labels:  labels,
+		Env:     opt.Env,
 	})
 	if err != nil {
 		return Result{}, err
