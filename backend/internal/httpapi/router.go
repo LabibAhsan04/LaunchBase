@@ -22,17 +22,17 @@ type handlers struct {
 	gh  *github.Client
 }
 
-func NewMux(svc *service.Service) http.Handler {
-	return NewMuxWithGitHub(svc, nil)
-}
-
-func NewMuxWithGitHub(svc *service.Service, gh *github.Client) http.Handler {
+func buildMux(svc *service.Service, gh *github.Client, opt Options) http.Handler {
 	limits := security.LimitsFromEnv()
 	if svc != nil && svc.Limits.MaxBuildsPerUser == 0 {
 		svc.Limits = limits
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
+	mux.HandleFunc("GET /ready", ready(opt.Ready))
+	if opt.Metrics != nil {
+		mux.Handle("GET /metrics", opt.Metrics)
+	}
 	if svc != nil {
 		h := handlers{svc: svc, gh: gh}
 		mux.HandleFunc("GET /api/v1/auth/login", h.authLogin)
@@ -82,9 +82,9 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, Last-Event-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, Last-Event-ID, traceparent")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, traceparent")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -22,9 +22,14 @@ func securityHeaders(next http.Handler) http.Handler {
 func rateLimit(api, authLimit *security.Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			if path == "/health" || path == "/ready" || path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			key := security.ClientKey(r)
 			lim := api
-			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
+			if strings.HasPrefix(path, "/api/v1/auth/") {
 				lim = authLimit
 			}
 			if lim != nil && !lim.Allow(key) {

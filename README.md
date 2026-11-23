@@ -11,6 +11,10 @@ LaunchBase takes a GitHub repository, builds it in Docker, and gives you a URL. 
 | `backend/cmd/worker` | Queue worker. Also a one-shot deploy when you pass `--repo`. |
 | `docker-compose.yml` | Postgres, Redis, Traefik on a network named `launchbase`. |
 | `docs/openapi.yaml` | HTTP contract. |
+| `docs/testing.md` | Unit / integration / e2e commands and CI matrix. |
+| `docs/observability.md` | JSON logs, metrics, readiness, trace context. |
+| `docs/adr/` | Architecture decision records. |
+| `docs/release-checklist.md` | Pre-release and smoke checks. |
 
 The API process opens Postgres, runs migrations, and publishes jobs to Redis. It does not build or start a user container. `POST /api/v1/projects/{id}/deployments` commits a `QUEUED` deployment and an outbox row in one transaction, then returns. If Redis is down, the row stays in `deployment_outbox` until the API or the worker can publish it.
 
@@ -45,9 +49,20 @@ make web
 ```
 
 - Dashboard: http://localhost:3000
-- API health: http://localhost:8080/health
-- Worker health: http://localhost:8081/health and http://localhost:8081/ready
+- API health / ready / metrics: http://localhost:8080/health , `/ready`, `/metrics`
+- Worker health / ready / metrics: http://localhost:8081/health , `/ready`, `/metrics`
 - Traefik dashboard: http://localhost:8088
+
+Optional Prometheus and Grafana (not started by `make dev-infra`):
+
+```bash
+make observability-up
+```
+
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3001 (admin / admin)
+
+See `docs/observability.md`.
 
 The browser talks to the Go API at `NEXT_PUBLIC_API_URL` (default `http://localhost:8080`). The API allows that origin through `WEB_ORIGIN` (default `http://localhost:3000`).
 
@@ -93,11 +108,13 @@ infrastructure/scripts/test-next-demo.sh
 
 ```bash
 make test
+make coverage
 make lint
 make format
+make e2e
 ```
 
-`make test` runs `go test ./...`, `pnpm typecheck`, and `pnpm test` in `apps/web`. The API and queue tests need Postgres and Redis (`make dev-infra`). They do not need a Docker build. The example deploy scripts do. `make lint` is `go vet` plus eslint.
+`make test` runs `go test ./...`, `pnpm typecheck`, and `pnpm test` in `apps/web`. The API and queue tests need Postgres and Redis (`make dev-infra`). They do not need a Docker build. `make e2e` and the example deploy scripts need Docker and Traefik. `make lint` is `go vet` plus eslint. Layers and the CI matrix are in `docs/testing.md`.
 
 ## Security
 

@@ -55,6 +55,14 @@ func (db *DB) HasPendingOutbox(ctx context.Context, deploymentID string) (bool, 
 	return n > 0, err
 }
 
+// CountPendingOutbox returns unpublished outbox rows (queue depth estimate).
+func (db *DB) CountPendingOutbox(ctx context.Context) (int64, error) {
+	var n int64
+	err := db.sql.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM deployment_outbox WHERE published_at IS NULL`).Scan(&n)
+	return n, err
+}
+
 // ResetToQueued is how a worker recovers a deployment it found mid-build after a crash.
 // READY, FAILED, STOPPED, and SUPERSEDED are left alone.
 func (db *DB) ResetToQueued(ctx context.Context, id string) error {

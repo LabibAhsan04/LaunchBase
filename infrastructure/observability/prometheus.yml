@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: launchbase-api
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+  - job_name: launchbase-worker
+    static_configs:
+      - targets: ["host.docker.internal:8081"]

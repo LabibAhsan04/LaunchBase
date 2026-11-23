@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +17,7 @@ import (
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/observability"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -61,41 +61,49 @@ func runOnce(repo, branch string, port int, healthPath string) {
 }
 
 func runQueue() {
+	logger := observability.NewLogger("worker", os.Stdout)
+	metrics := observability.NewMetrics()
+
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = "postgres://launchbase:launchbase@localhost:5433/launchbase?sslmode=disable"
-		log.Printf("DATABASE_URL is unset, using the local compose database")
+		logger.Info("database_url_default", nil)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	db, err := store.Open(ctx, dsn)
 	cancel()
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		logger.Error("database_open_failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	defer db.Close()
 
 	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
 	if err := db.Migrate(ctx); err != nil {
 		cancel()
-		log.Fatalf("migrate: %v", err)
+		logger.Error("migrate_failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	cancel()
 
 	stream, err := queue.Open(redisURL())
 	if err != nil {
-		log.Fatalf("redis url: %v", err)
+		logger.Error("redis_url_invalid", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	defer stream.Close()
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	if err := stream.Ping(ctx); err != nil {
 		cancel()
-		log.Fatalf("redis: %v", err)
+		logger.Error("redis_unreachable", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	cancel()
 
 	hub, err := logs.NewRedisHub(redisURL())
 	if err != nil {
-		log.Fatalf("log hub: %v", err)
+		logger.Error("log_hub_failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 	defer hub.Close()
 	broker := &logs.Broker{
@@ -106,17 +114,19 @@ func runQueue() {
 
 	gh, err := github.ClientFromEnv()
 	if err != nil {
-		log.Fatalf("github: %v", err)
+		logger.Error("github_config_invalid", map[string]any{"error": err.Error()})
+		os.Exit(1)
 	}
 
 	name := workerName()
 	engine := dockerengine.Client{}
+	logWriter := observability.Writer{Log: logger}
 	proc := &deployments.Processor{
 		Store:  db,
 		Run:    deployments.Run,
 		Remove: engine,
 		Images: engine,
-		Log:    os.Stdout,
+		Log:    logWriter,
 		Logs:   broker,
 		Owner:  name,
 		Tokens: github.InstallationTokens{Client: gh},
@@ -134,42 +144,88 @@ func runQueue() {
 	consumer := &queue.Consumer{
 		Store:  db,
 		Stream: stream,
-		Handle: proc.Execute,
-		Name:   name,
-		Log:    os.Stdout,
+		Handle: func(ctx context.Context, job queue.Job) (queue.Result, error) {
+			start := time.Now()
+			res, err := proc.Execute(ctx, job)
+			outcome := "ok"
+			switch {
+			case err != nil:
+				outcome = "error"
+			case res.Dead:
+				outcome = "failed"
+			case res.Busy:
+				outcome = "busy"
+			}
+			dur := time.Since(start).Milliseconds()
+			metrics.ObserveJob(outcome, dur)
+			fields := map[string]any{
+				"deploymentId": job.DeploymentID,
+				"projectId":    job.ProjectID,
+				"outcome":      outcome,
+				"durationMs":   dur,
+				"attempt":      job.Attempt,
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				logger.Error("job_finished", fields)
+			} else {
+				logger.Info("job_finished", fields)
+			}
+			return res, err
+		},
+		Name: name,
+		Log:  logWriter,
 	}
 
 	addr := envString("WORKER_ADDR", ":8081")
 	gate := &queue.Gate{}
 	srv := &http.Server{
 		Addr: addr,
-		Handler: queue.Handler(gate, func(ctx context.Context) error {
+		Handler: queue.HandlerWithMetrics(gate, func(ctx context.Context) error {
 			if err := stream.Ping(ctx); err != nil {
 				return err
 			}
 			return db.Ping(ctx)
-		}),
+		}, metrics.Handler()),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("worker health: %v", err)
+			logger.Error("worker_health_failed", map[string]any{"error": err.Error()})
+			os.Exit(1)
 		}
 	}()
+	go sampleWorkerMetrics(db, metrics)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()
 		gate.Drain()
-		log.Printf("worker shutting down after the current job")
+		logger.Info("worker_draining", map[string]any{"worker": name})
 	}()
-	log.Printf("worker %s consuming %s, health on %s", name, queue.StreamName, addr)
+	logger.Info("worker_started", map[string]any{"worker": name, "stream": queue.StreamName, "health": addr})
 	if err := consumer.Run(ctx); err != nil {
-		log.Printf("worker: %v", err)
+		logger.Error("worker_stopped", map[string]any{"error": err.Error()})
 	}
 	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shut)
+}
+
+func sampleWorkerMetrics(db *store.DB, metrics *observability.Metrics) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if n, err := db.CountPendingOutbox(ctx); err == nil {
+			metrics.SetQueueDepth(n)
+		}
+		if n, err := db.CountDeploymentsByStatus(ctx, "", []string{"READY"}); err == nil {
+			metrics.SetActiveContainers(int64(n))
+		}
+		cancel()
+	}
 }
 
 func workerName() string {
