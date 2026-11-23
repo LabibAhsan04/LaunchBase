@@ -19,6 +19,10 @@ func TestContainerRunArgs(t *testing.T) {
 			"traefik.enable":                 "true",
 			"traefik.http.routers.demo.rule": "Host(`demo.launchbase.localhost`)",
 		},
+		Env: map[string]string{
+			"FINNHUB_API_KEY": "abc123xyz",
+			"DATABASE_URL":    "postgres://should-skip",
+		},
 	})
 	joined := strings.Join(args, "\n")
 	for _, want := range []string{
@@ -29,11 +33,15 @@ func TestContainerRunArgs(t *testing.T) {
 		"--security-opt\nno-new-privileges:true",
 		"--cap-drop\nALL",
 		"--memory-swap\n512m",
+		"-e\nFINNHUB_API_KEY=abc123xyz",
 		"launchbase/abc",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in:\n%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "DATABASE_URL") {
+		t.Fatal("LaunchBase env must not be passed")
 	}
 	if err := AssertSafeRunArgs(args); err != nil {
 		t.Fatal(err)

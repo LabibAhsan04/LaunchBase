@@ -34,6 +34,7 @@ jobs:
     env:
       DATABASE_URL: postgres://launchbase:launchbase@localhost:5432/launchbase?sslmode=disable
       REDIS_URL: redis://localhost:6379/0
+      SESSION_SECRET: ci-only-not-a-real-secret
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

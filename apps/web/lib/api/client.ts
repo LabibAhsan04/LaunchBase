@@ -5,6 +5,8 @@ import {
   deploymentLogListSchema,
   deploymentSchema,
   installationListSchema,
+  projectEnvListSchema,
+  projectEnvVarSchema,
   projectListSchema,
   projectSchema,
   repoListSchema,
@@ -17,7 +19,9 @@ import type {
   DeploymentLog,
   InstallationList,
   Project,
+  ProjectEnvVar,
   RepoAccess,
+  UpsertEnvInput,
 } from "./types";
 
 export class ApiError extends Error {
@@ -196,4 +200,27 @@ export function listLogs(deploymentId: string, after = 0): Promise<DeploymentLog
 export function logsStreamURL(deploymentId: string, after = 0): string {
   const root = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
   return `${root}/api/v1/deployments/${deploymentId}/logs/stream?after=${after}`;
+}
+
+export function listEnvVars(projectId: string): Promise<ProjectEnvVar[]> {
+  return request(`/api/v1/projects/${projectId}/env`, undefined, (data) =>
+    projectEnvListSchema.parse(data).vars,
+  );
+}
+
+export function upsertEnvVar(projectId: string, input: UpsertEnvInput): Promise<ProjectEnvVar> {
+  return request(
+    `/api/v1/projects/${projectId}/env`,
+    { method: "PUT", body: JSON.stringify(input) },
+    (data) => projectEnvVarSchema.parse(data),
+  );
+}
+
+export function deleteEnvVar(projectId: string, key: string, environment = "production"): Promise<void> {
+  const q = environment ? `?environment=${encodeURIComponent(environment)}` : "";
+  return request(
+    `/api/v1/projects/${projectId}/env/${encodeURIComponent(key)}${q}`,
+    { method: "DELETE" },
+    () => undefined,
+  );
 }

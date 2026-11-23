@@ -62,6 +62,7 @@ Do not present HTTP-only mode as a production security posture.
 - `AUTH_MODE=github` (required in compose)
 - `AUTH_ALLOWLIST=yourlogin,teammate` — OAuth users outside the list get `403 not_invited`
 - No open registration; GitHub App installation still gates which repos can deploy
+- Set `ENV_ENCRYPTION_KEY` (or rely on `SESSION_SECRET`) so project env vars encrypt at rest; rotating it without re-saving vars makes ciphertext unreadable
 
 ## Operator status
 

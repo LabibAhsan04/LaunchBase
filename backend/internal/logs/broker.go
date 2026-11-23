@@ -65,6 +65,15 @@ type Broker struct {
 	Secrets []string
 }
 
+// WithSecrets returns a broker that also redacts extra values (e.g. project env).
+func (b *Broker) WithSecrets(extra []string) *Broker {
+	if b == nil {
+		return nil
+	}
+	secrets := append(append([]string{}, b.Secrets...), extra...)
+	return &Broker{Sink: b.Sink, Hub: b.Hub, Secrets: secrets}
+}
+
 func (b *Broker) Append(ctx context.Context, deploymentID, source, level, message string) (Event, error) {
 	if b.Sink == nil {
 		return Event{}, fmt.Errorf("log sink is not configured")

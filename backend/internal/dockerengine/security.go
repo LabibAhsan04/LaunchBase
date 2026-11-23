@@ -71,12 +71,14 @@ func AssertSafeRunArgs(args []string) error {
 }
 
 func isLaunchBaseEnv(key string) bool {
-	switch strings.ToUpper(key) {
-	case "DATABASE_URL", "REDIS_URL", "SESSION_SECRET",
-		"GITHUB_CLIENT_SECRET", "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET":
+	k := strings.ToUpper(key)
+	switch k {
+	case "DATABASE_URL", "REDIS_URL", "SESSION_SECRET", "ENV_ENCRYPTION_KEY",
+		"GITHUB_CLIENT_SECRET", "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET",
+		"OPS_TOKEN", "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH":
 		return true
 	default:
-		return strings.HasPrefix(strings.ToUpper(key), "LAUNCHBASE_")
+		return strings.HasPrefix(k, "LAUNCHBASE_") || strings.HasPrefix(k, "DOCKER_")
 	}
 }
 

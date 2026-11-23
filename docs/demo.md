@@ -14,8 +14,9 @@
 3. **Create project (20s)** — New project → pick the demo repo + branch → Create.
 4. **Deploy + logs (40s)** — Deploy → open the deployment page → live SSE logs scroll through clone/build/start.
 5. **URL (20s)** — When status is READY, click the Traefik URL (`https://<slug>.BASE_DOMAIN/`) and show the app response.
-6. **Engineering (20s)** — “API never talks to Docker; a worker owns builds. Postgres outbox + Redis queue, hardened containers, CI with an e2e Traefik check.”
-7. **Stop (10s)** — Stop the deployment to free the ready slot.
+6. **Env (optional)** — On the project page, set an app key (masked after save), redeploy, show the app reading it.
+7. **Engineering (20s)** — “API never talks to Docker; a worker owns builds. Postgres outbox + Redis queue, hardened containers, encrypted env injection.”
+8. **Stop (10s)** — Stop the deployment to free the ready slot.
 
 ## Fallback if something fails
 

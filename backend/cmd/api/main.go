@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/envcrypt"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/httpapi"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
@@ -88,12 +89,19 @@ func main() {
 		logger.Info("github_unconfigured", map[string]any{"authMode": os.Getenv("AUTH_MODE")})
 	}
 
+	envBox, err := envcrypt.FromEnv()
+	if err != nil {
+		logger.Error("env_encryption_failed", map[string]any{"error": err.Error()})
+		os.Exit(1)
+	}
+
 	svc := &service.Service{
 		Store:   db,
 		Remover: dockerengine.Client{},
 		Log:     observability.Writer{Log: logger},
 		Logs:    broker,
 		GitHub:  gh,
+		EnvBox:  envBox,
 		Flush: func(ctx context.Context) error {
 			_, err := db.PublishPending(ctx, func(payload []byte) error {
 				return stream.Publish(ctx, payload)

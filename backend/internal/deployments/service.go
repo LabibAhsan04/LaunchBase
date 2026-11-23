@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/envcrypt"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
@@ -35,6 +36,7 @@ type Processor struct {
 	Images      ImageRemover
 	Log         io.Writer
 	Logs        *logs.Broker
+	EnvBox      *envcrypt.Box
 	Limits      Options
 	Owner       string
 	Tokens      TokenSource
@@ -90,8 +92,17 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 	if run == nil {
 		run = Run
 	}
-	stdout := logs.Tee(p.Log, p.Logs, dep.ID)
+
+	appEnv, envSecrets, envErr := p.loadAppEnv(ctx, dep.ProjectID)
+	if envErr != nil {
+		return p.fail(ctx, dep, job, StatusQueued, fmt.Errorf("project env: %w", envErr))
+	}
+	broker := p.Logs.WithSecrets(envSecrets)
+	stdout := logs.Tee(p.Log, broker, dep.ID)
 	p.emit(dep.ID, logs.LevelInfo, "worker picked up deployment")
+	if len(appEnv) > 0 {
+		p.emit(dep.ID, logs.LevelInfo, fmt.Sprintf("injecting %d project env var(s)", len(appEnv)))
+	}
 	cloneToken := ""
 	if job.InstallationID != 0 && p.Tokens != nil {
 		tok, tokErr := p.Tokens.CreateInstallationToken(ctx, job.InstallationID)
@@ -112,6 +123,7 @@ func (p *Processor) Execute(ctx context.Context, job queue.Job) (queue.Result, e
 		ProjectSlug:  slug,
 		BaseDomain:   p.Limits.BaseDomain,
 		Network:      p.Limits.Network,
+		Env:          appEnv,
 		CloneTimeout: p.Limits.CloneTimeout,
 		BuildTimeout: p.Limits.BuildTimeout,
 		StartTimeout: p.Limits.StartTimeout,
@@ -277,6 +289,39 @@ func (p *Processor) emit(deploymentID, level, message string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, _ = p.Logs.Append(ctx, deploymentID, logs.SourceSystem, level, message)
+}
+
+func (p *Processor) loadAppEnv(ctx context.Context, projectID string) (map[string]string, []string, error) {
+	rows, err := p.Store.ListProjectEnv(ctx, projectID, "production")
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(rows) == 0 {
+		return map[string]string{}, nil, nil
+	}
+	box := p.EnvBox
+	if box == nil {
+		box, err = envcrypt.FromEnv()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	out := make(map[string]string, len(rows))
+	secrets := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if envcrypt.ReservedKey(row.Key) {
+			continue
+		}
+		plain, err := box.Open(row.Ciphertext)
+		if err != nil {
+			return nil, nil, err
+		}
+		out[row.Key] = plain
+		if len(plain) >= 6 {
+			secrets = append(secrets, plain)
+		}
+	}
+	return out, secrets, nil
 }
 
 func terminal(status Status) bool {

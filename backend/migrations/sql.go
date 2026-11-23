@@ -17,6 +17,9 @@ var githubAuth string
 //go:embed 0005_routing.sql
 var routing string
 
+//go:embed 0006_project_env.sql
+var projectEnv string
+
 // File is one migration. Version is the key stored in schema_migrations.
 type File struct {
 	Version string
@@ -31,5 +34,6 @@ func All() []File {
 		{Version: "0003_logs", SQL: logs},
 		{Version: "0004_github_auth", SQL: githubAuth},
 		{Version: "0005_routing", SQL: routing},
+		{Version: "0006_project_env", SQL: projectEnv},
 	}
 }

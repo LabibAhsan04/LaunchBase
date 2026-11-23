@@ -94,3 +94,14 @@ export const installationListSchema = z.object({
   ),
   installUrl: z.string(),
 });
+
+export const projectEnvVarSchema = z.object({
+  key: z.string(),
+  environment: z.string(),
+  hint: z.string(),
+  updatedAt: z.string(),
+});
+
+export const projectEnvListSchema = z.object({
+  vars: z.array(projectEnvVarSchema),
+});

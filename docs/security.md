@@ -34,7 +34,8 @@ LaunchBase is a single-host portfolio platform. It can demonstrate layered defen
 | Hang the worker forever | Clone/build/start timeouts with cleanup |
 | Flood the API | Per-IP rate limits; JSON body size cap (1 MiB) |
 | Read secrets from build logs | ANSI strip + configured secret redaction |
-| Inject LaunchBase env into apps | Runtime containers receive no LaunchBase env vars (MVP omits user env entirely) |
+| Inject LaunchBase env into apps | Reserved keys blocked at API and docker arg validation; only project env is passed via `-e` |
+| Leak app secrets via API/logs | AES-GCM at rest; list returns masked hints; values redacted from deployment logs |
 
 ## Runtime container controls
 
@@ -65,7 +66,7 @@ Health checks run through Traefik hostnames after the container is on the runtim
 
 ## Environment variables for user apps
 
-Encrypted-at-rest application secrets are deliberately omitted from the MVP. Deployment containers do not receive custom env files. Platform secrets never appear in API responses or Traefik labels.
+Project env vars (Phase 12) are stored encrypted (`ENV_ENCRYPTION_KEY` or `SESSION_SECRET`) in `project_env_vars`. The dashboard lists key names and masked hints only. The worker decrypts at start time and passes `-e KEY=value` into the runtime container. Reserved keys (`DATABASE_URL`, `SESSION_SECRET`, `LAUNCHBASE_*`, …) are rejected. Decrypted values are added to log redaction for that deployment. Redeploy to pick up changes on a running app. Design: `docs/adr/0005-project-env-vars.md`.
 
 ## Outbound networking
 
@@ -81,6 +82,7 @@ The API writes audit rows for:
 
 - `auth.login` / `auth.logout`
 - `project.created`
+- `project.env.set` / `project.env.delete`
 - `deployment.created` / `deployment.stopped` / `deployment.redeployed` / `deployment.rollback`
 - `deployment.ready` / `deployment.failed` / `deployment.superseded` (worker)
 - `permission.denied`

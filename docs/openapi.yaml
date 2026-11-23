@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.11.0
+  version: 0.12.0
   description: |
     AUTH_MODE=dev (default) acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`) when no session cookie is present.
@@ -16,6 +16,8 @@ info:
     READY deployments are routed by Traefik on `{slug}.launchbase.localhost`.
     Redeploy and rollback queue new immutable deployments; a successful cutover marks
     the previous READY deployment SUPERSEDED.
+    Project env vars are encrypted at rest; list responses return masked hints only.
+    The worker injects them at container start. See docs/adr/0005-project-env-vars.md.
     Concurrency and per-IP rate limits return 429. See docs/security.md.
     JSON logs, `/metrics`, `/ready`, and traceparent hooks: docs/observability.md.
     Portfolio VM deploy: docs/deployment.md. Operator status: GET /api/v1/ops/status.
@@ -268,6 +270,89 @@ paths:
                     createdAt: "2026-10-27T18:01:00Z"
                     updatedAt: "2026-10-27T18:04:00Z"
                     finishedAt: "2026-10-27T18:04:00Z"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectId}/env:
+    get:
+      summary: List project environment variables (masked)
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: environment
+          in: query
+          schema:
+            type: string
+            default: production
+      responses:
+        "200":
+          description: Masked env vars (never plaintext)
+          content:
+            application/json:
+              example:
+                vars:
+                  - key: FINNHUB_API_KEY
+                    environment: production
+                    hint: "••••_key"
+                    updatedAt: "2026-11-23T20:00:00Z"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    put:
+      summary: Create or update a project environment variable
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key:
+                  type: string
+                  example: FINNHUB_API_KEY
+                value:
+                  type: string
+                environment:
+                  type: string
+                  default: production
+      responses:
+        "200":
+          description: Saved (masked hint only)
+          content:
+            application/json:
+              example:
+                key: FINNHUB_API_KEY
+                environment: production
+                hint: "••••_key"
+                updatedAt: "2026-11-23T20:00:00Z"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectId}/env/{key}:
+    delete:
+      summary: Delete a project environment variable
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: environment
+          in: query
+          schema:
+            type: string
+            default: production
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/projects/{projectId}/deployments:
