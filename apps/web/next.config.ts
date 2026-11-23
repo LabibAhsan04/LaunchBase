@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   // Cache Components prerender rejects that unless every route is rewritten
   // around Suspense/"use cache"; keep the app request-rendered instead.
   cacheComponents: false,
+  output: "standalone",
   turbopack: {
     rules: {
       "*.css": {

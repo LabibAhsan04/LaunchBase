@@ -1,0 +1,15 @@
+# Overlay for temporary HTTP-only demos (IP / nip.io) without TLS.
+#   docker compose -f docker-compose.yml -f docker-compose.http.yml --env-file .env up -d --build
+services:
+  api:
+    labels:
+      - traefik.http.routers.lb-api.entrypoints=web
+      - traefik.http.routers.lb-api.tls=false
+      - traefik.http.routers.lb-api-http.middlewares=
+  web:
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://${CONTROL_HOST}}
+    labels:
+      - traefik.http.routers.lb-web.entrypoints=web
+      - traefik.http.routers.lb-web.tls=false
+      - traefik.http.routers.lb-web-http.middlewares=

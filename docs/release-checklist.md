@@ -7,9 +7,13 @@ Use before tagging a release or promoting a demo environment.
 - [ ] `main` CI green (`backend`, `web`, `docker`, `e2e`)
 - [ ] `docs/openapi.yaml` version and paths match the running API
 - [ ] Migrations apply cleanly on an empty database and on the previous schema
-- [ ] `AUTH_MODE=github` configured for any shared host; `AUTH_MODE=dev` only for local
+- [ ] `AUTH_MODE=github` + `AUTH_ALLOWLIST` for any shared host; `AUTH_MODE=dev` only for local
 - [ ] Secrets present via env/files only (no `.env` or PEM in git)
-- [ ] Container limits and rate limits reviewed (`docs/security.md`)
+- [ ] Container limits, `MAX_READY_GLOBAL`, and rate limits reviewed (`docs/security.md`)
+- [ ] Production compose / DNS / TLS smoke from `docs/deployment.md`
+- [ ] Backup script run once; restore tested on a disposable VM
+- [ ] `docs/demo.md` walkthrough rehearsed; screenshots updated if UI changed
+- [ ] `docs/audit.md` limitations still accurate
 
 ## Smoke after deploy
 

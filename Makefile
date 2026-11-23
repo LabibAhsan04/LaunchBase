@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-infra stop-infra observability-up observability-down api worker worker-once web test lint format coverage e2e
+.PHONY: help dev-infra stop-infra observability-up observability-down api worker worker-once web test lint format coverage e2e prod-up prod-down
 
 help:
 	@echo "dev-infra           postgres, redis, traefik"
@@ -14,6 +14,8 @@ help:
 	@echo "test                go tests and frontend typecheck + vitest"
 	@echo "coverage            go tests with coverage summary"
 	@echo "e2e                 Traefik + example node-demo routed URL"
+	@echo "prod-up             build/start infrastructure/production stack (needs .env)"
+	@echo "prod-down           stop production stack"
 	@echo "lint                go vet and eslint"
 	@echo "format              gofmt and eslint --fix"
 
@@ -52,6 +54,12 @@ coverage:
 
 e2e:
 	infrastructure/scripts/e2e-deploy.sh
+
+prod-up:
+	cd infrastructure/production && docker compose --env-file .env up -d --build
+
+prod-down:
+	cd infrastructure/production && docker compose --env-file .env down
 
 lint:
 	cd backend && go vet ./...

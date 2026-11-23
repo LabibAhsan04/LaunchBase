@@ -51,6 +51,10 @@ func (h handlers) authCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "oauth_failed", "could not load github user")
 		return
 	}
+	if !auth.AllowedLogin(info.Login) {
+		writeError(w, http.StatusForbidden, "not_invited", "this GitHub account is not on the demo allowlist")
+		return
+	}
 	display := strings.TrimSpace(info.Name)
 	if display == "" {
 		display = info.Login
