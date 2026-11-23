@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/dockerengine"
 )
 
 type recorded struct {
@@ -173,8 +175,14 @@ func TestDeployHappyPath(t *testing.T) {
 	if !contains(runArgs, "--label") {
 		t.Fatalf("missing traefik labels: %v", runArgs)
 	}
-	if contains(runArgs, "--privileged") {
-		t.Fatal("privileged")
+	if !contains(runArgs, "no-new-privileges:true") || !contains(runArgs, "--cap-drop") {
+		t.Fatalf("missing hardening: %v", runArgs)
+	}
+	if contains(runArgs, "--privileged") || contains(runArgs, "docker.sock") {
+		t.Fatal("privileged or docker.sock")
+	}
+	if err := dockerengine.AssertSafeRunArgs(runArgs); err != nil {
+		t.Fatal(err)
 	}
 
 	text := log.String()

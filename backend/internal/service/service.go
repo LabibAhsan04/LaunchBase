@@ -17,6 +17,7 @@ import (
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/logs"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/queue"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/security"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
 
@@ -45,9 +46,17 @@ type Service struct {
 	Log     io.Writer
 	Logs    *logs.Broker
 	GitHub  *github.Client
+	Limits  security.Limits
 	// Flush publishes one outbox row. The deployment is already committed if this fails.
 	Flush func(context.Context) error
 }
+
+// LimitError is returned when concurrency caps are hit.
+type LimitError struct {
+	Message string
+}
+
+func (e LimitError) Error() string { return e.Message }
 
 type CreateProjectInput struct {
 	Name     string
@@ -192,6 +201,10 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 	if err != nil {
 		return store.Deployment{}, err
 	}
+	if auth.RequiresGitHub() && project.InstallationID == "" {
+		_ = s.audit(ctx, owner, "permission.denied", project.ID, "", "deploy without installation")
+		return store.Deployment{}, InputError{Message: "project is not linked to a GitHub App installation"}
+	}
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		branch = project.Branch
@@ -199,6 +212,9 @@ func (s *Service) CreateDeployment(ctx context.Context, projectID, branch string
 	branch, err = github.ParseBranch(branch)
 	if err != nil {
 		return store.Deployment{}, InputError{Message: err.Error()}
+	}
+	if err := s.checkConcurrency(ctx, owner); err != nil {
+		return store.Deployment{}, err
 	}
 
 	var installationGHID int64
@@ -333,6 +349,9 @@ func (s *Service) Rollback(ctx context.Context, deploymentID string) (store.Depl
 		return store.Deployment{}, err
 	}
 
+	if err := s.checkConcurrency(ctx, owner); err != nil {
+		return store.Deployment{}, err
+	}
 	id, err := newID()
 	if err != nil {
 		return store.Deployment{}, err
@@ -377,6 +396,39 @@ func (s *Service) Rollback(ctx context.Context, deploymentID string) (store.Depl
 		}
 	}
 	return out, nil
+}
+
+func (s *Service) checkConcurrency(ctx context.Context, owner string) error {
+	limits := s.Limits
+	if limits.MaxBuildsPerUser == 0 {
+		limits = security.LimitsFromEnv()
+	}
+	userBuilds, err := s.Store.CountDeploymentsByStatus(ctx, owner, security.BuildStatuses)
+	if err != nil {
+		return err
+	}
+	if userBuilds >= limits.MaxBuildsPerUser {
+		return LimitError{Message: "too many active builds for this user"}
+	}
+	globalBuilds, err := s.Store.CountDeploymentsByStatus(ctx, "", security.BuildStatuses)
+	if err != nil {
+		return err
+	}
+	if globalBuilds >= limits.MaxBuildsGlobal {
+		return LimitError{Message: "platform build capacity is full, try again shortly"}
+	}
+	ready, err := s.Store.CountDeploymentsByStatus(ctx, owner, security.ReadyStatuses)
+	if err != nil {
+		return err
+	}
+	if ready >= limits.MaxReadyPerUser {
+		return LimitError{Message: "too many ready deployments; stop one before starting another"}
+	}
+	return nil
+}
+
+func (s *Service) Audit(ctx context.Context, actorID, action, projectID, deploymentID, detail string) error {
+	return s.audit(ctx, actorID, action, projectID, deploymentID, detail)
 }
 
 func (s *Service) uniqueSlug(ctx context.Context, name, id string) (string, error) {

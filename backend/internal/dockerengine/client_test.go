@@ -26,11 +26,17 @@ func TestContainerRunArgs(t *testing.T) {
 		"--label\ntraefik.enable=true",
 		"--label\ntraefik.http.routers.demo.rule=Host(`demo.launchbase.localhost`)",
 		"--user\nnode",
+		"--security-opt\nno-new-privileges:true",
+		"--cap-drop\nALL",
+		"--memory-swap\n512m",
 		"launchbase/abc",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in:\n%s", want, joined)
 		}
+	}
+	if err := AssertSafeRunArgs(args); err != nil {
+		t.Fatal(err)
 	}
 	for _, arg := range args {
 		if arg == "--privileged" || strings.Contains(arg, "docker.sock") || arg == "-p" {

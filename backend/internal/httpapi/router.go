@@ -12,6 +12,7 @@ import (
 
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/auth"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/github"
+	"github.com/LabibAhsan04/LaunchBase/backend/internal/security"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/service"
 	"github.com/LabibAhsan04/LaunchBase/backend/internal/store"
 )
@@ -26,6 +27,10 @@ func NewMux(svc *service.Service) http.Handler {
 }
 
 func NewMuxWithGitHub(svc *service.Service, gh *github.Client) http.Handler {
+	limits := security.LimitsFromEnv()
+	if svc != nil && svc.Limits.MaxBuildsPerUser == 0 {
+		svc.Limits = limits
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
 	if svc != nil {
@@ -38,20 +43,20 @@ func NewMuxWithGitHub(svc *service.Service, gh *github.Client) http.Handler {
 		mux.HandleFunc("GET /api/v1/auth/install", h.authInstall)
 		mux.HandleFunc("POST /api/v1/webhooks/github", h.githubWebhook)
 
-		mux.HandleFunc("GET /api/v1/github/repos", requireAuth(h.listGitHubRepos))
-		mux.HandleFunc("GET /api/v1/github/repos/{owner}/{repo}/branches", requireAuth(h.listGitHubBranches))
-		mux.HandleFunc("GET /api/v1/github/installations", requireAuth(h.listInstallations))
+		mux.HandleFunc("GET /api/v1/github/repos", h.requireAuth(h.listGitHubRepos))
+		mux.HandleFunc("GET /api/v1/github/repos/{owner}/{repo}/branches", h.requireAuth(h.listGitHubBranches))
+		mux.HandleFunc("GET /api/v1/github/installations", h.requireAuth(h.listInstallations))
 
-		mux.HandleFunc("POST /api/v1/projects", requireAuth(h.createProject))
-		mux.HandleFunc("GET /api/v1/projects", requireAuth(h.listProjects))
-		mux.HandleFunc("GET /api/v1/projects/{projectId}", requireAuth(h.getProject))
-		mux.HandleFunc("POST /api/v1/projects/{projectId}/deployments", requireAuth(h.createDeployment))
-		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", requireAuth(h.getDeployment))
-		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", requireAuth(h.stopDeployment))
-		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/redeploy", requireAuth(h.redeployDeployment))
-		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/rollback", requireAuth(h.rollbackDeployment))
-		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs", requireAuth(h.listLogs))
-		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs/stream", requireAuth(h.streamLogs))
+		mux.HandleFunc("POST /api/v1/projects", h.requireAuth(h.createProject))
+		mux.HandleFunc("GET /api/v1/projects", h.requireAuth(h.listProjects))
+		mux.HandleFunc("GET /api/v1/projects/{projectId}", h.requireAuth(h.getProject))
+		mux.HandleFunc("POST /api/v1/projects/{projectId}/deployments", h.requireAuth(h.createDeployment))
+		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}", h.requireAuth(h.getDeployment))
+		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/stop", h.requireAuth(h.stopDeployment))
+		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/redeploy", h.requireAuth(h.redeployDeployment))
+		mux.HandleFunc("POST /api/v1/deployments/{deploymentId}/rollback", h.requireAuth(h.rollbackDeployment))
+		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs", h.requireAuth(h.listLogs))
+		mux.HandleFunc("GET /api/v1/deployments/{deploymentId}/logs/stream", h.requireAuth(h.streamLogs))
 	}
 
 	devUser := auth.User{
@@ -62,20 +67,12 @@ func NewMuxWithGitHub(svc *service.Service, gh *github.Client) http.Handler {
 		sessions = svc.Store
 	}
 	withAuth := auth.Middleware{Sessions: sessions, DevUser: devUser}.Wrap(mux)
-	return cors(requestIDs(withAuth))
+	apiLimit := security.NewLimiter(limits.APIRatePerMin)
+	authLimit := security.NewLimiter(limits.AuthRatePerMin)
+	return securityHeaders(cors(rateLimit(apiLimit, authLimit)(requestIDs(withAuth))))
 }
 
 type SessionStore = auth.SessionStore
-
-func requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := auth.UserFrom(r.Context()); !ok {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "sign in required")
-			return
-		}
-		next(w, r)
-	}
-}
 
 func cors(next http.Handler) http.Handler {
 	origin := strings.TrimSpace(os.Getenv("WEB_ORIGIN"))
@@ -131,9 +128,12 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeServiceError(w http.ResponseWriter, err error) {
 	var input service.InputError
 	var conflict service.ConflictError
+	var limited service.LimitError
 	switch {
 	case errors.Is(err, auth.ErrUnauthorized):
 		writeError(w, http.StatusUnauthorized, "unauthorized", "sign in required")
+	case errors.As(err, &limited):
+		writeError(w, http.StatusTooManyRequests, "limit_exceeded", limited.Message)
 	case errors.As(err, &input):
 		writeError(w, http.StatusBadRequest, "invalid_request", input.Message)
 	case errors.As(err, &conflict):

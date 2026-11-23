@@ -37,6 +37,7 @@ func SecretsFromEnv() []string {
 		"REDIS_URL",
 		"GITHUB_CLIENT_SECRET",
 		"GITHUB_APP_PRIVATE_KEY",
+		"GITHUB_WEBHOOK_SECRET",
 	}
 	if extra := strings.TrimSpace(os.Getenv("LOG_REDACT_ENV")); extra != "" {
 		for _, key := range strings.Split(extra, ",") {

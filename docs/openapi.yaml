@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: LaunchBase API
-  version: 0.8.0
+  version: 0.9.0
   description: |
     AUTH_MODE=dev (default) acts as the seeded user `local`
     (`00000000-0000-4000-8000-000000000001`) when no session cookie is present.
-    AUTH_MODE=github requires a signed-in session for project and deployment APIs.
+    AUTH_MODE=github requires a signed-in session for project and deployment APIs
+    and repositories linked through a GitHub App installation.
 
     Sessions use an HTTP-only cookie (`lb_session`). CORS allows credentials from WEB_ORIGIN.
     Creating a deployment stores a QUEUED row and returns immediately.
@@ -14,6 +15,7 @@ info:
     READY deployments are routed by Traefik on `{slug}.launchbase.localhost`.
     Redeploy and rollback queue new immutable deployments; a successful cutover marks
     the previous READY deployment SUPERSEDED.
+    Concurrency and per-IP rate limits return 429. See docs/security.md.
 servers:
   - url: http://localhost:8080
 paths:

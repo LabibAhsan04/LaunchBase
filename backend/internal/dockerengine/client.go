@@ -121,6 +121,7 @@ func containerRunArgs(s RunSpec) []string {
 		"--read-only",
 		"--tmpfs", "/tmp",
 	}
+	args = AppendSecurityArgs(args, s.Memory, DefaultSecurityOpts())
 	keys := make([]string, 0, len(s.Labels))
 	for k := range s.Labels {
 		keys = append(keys, k)
@@ -135,6 +136,7 @@ func containerRunArgs(s RunSpec) []string {
 	if s.User != "" {
 		args = append(args, "--user", s.User)
 	}
+	// Never pass -e / --env for LaunchBase secrets. User app env is omitted in the MVP.
 	args = append(args, s.Image)
 	return args
 }
